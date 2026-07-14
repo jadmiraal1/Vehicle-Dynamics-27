@@ -1,0 +1,23 @@
+# FSAE TTC data is licensed to registered teams only - NEVER commit or
+# redistribute it. Fresh clones: copy TTC_Data/ from the team drive
+# (vd_selftest's staleness gate will fail until you do - by design).
+TTC_Data/
+
+# Vendor datasheets & team documents (copyright / size). Keep the docs we
+# authored: the physics reference and the pipeline diagram stay tracked.
+references/*
+!references/VD_physics_reference.md
+!references/code_pipeline.mermaid
+
+# MATLAB litter
+*.asv
+*.autosave
+slprj/
+
+# Office lock files
+~$*
+
+# OS litter
+.DS_Store
+Thumbs.db
+desktop.ini

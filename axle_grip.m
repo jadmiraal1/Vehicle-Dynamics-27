@@ -1,0 +1,82 @@
+function out = axle_grip(p, v)
+% AXLE_GRIP  Mid-tier lateral limit: per-axle saturation with lateral load
+% transfer and tire load sensitivity. The physics the point mass cannot see:
+% transferring load to the outside tire LOSES total grip because mu falls
+% with load (mu_coef), so ay_lim < mu*g and depends on LLTD, track, CoP.
+% Theory: VD_physics_reference.md, section 11.
+%
+%   out = axle_grip(p, v)   v = speed [m/s] (sets downforce)
+%
+% Knobs read from p: LLTD (front fraction of lateral transfer, set by roll
+% stiffness split), aero_df_front (CoP), ClA, plus the usual mass/geometry.
+%
+% CAVEAT: single-knob LLTD (no roll-center geometry, no unsprung split),
+% no camber, symmetric left/right, steady state.
+
+DF   = 0.5 * p.rho * p.ClA * v^2;                      % downforce [N]
+W_f  = p.m * p.g * p.mass_dist_f       + p.aero_df_front     * DF;
+W_r  = p.m * p.g * (1 - p.mass_dist_f) + (1 - p.aero_df_front) * DF;
+
+% Demands from steady-state moment balance: Fy_f = m*ay*b/L, Fy_r = m*ay*a/L
+dem_frac_f = p.b / p.L;
+dem_frac_r = p.a / p.L;
+
+% Bisection on ay: capacity - demand crosses zero once
+lo = 0;  hi = 45;                                      % [m/s^2]
+for it = 1:60
+    ay = (lo + hi) / 2;
+    [cap_f, cap_r] = capacities(p, W_f, W_r, ay);
+    if min(cap_f - p.m*ay*dem_frac_f, cap_r - p.m*ay*dem_frac_r) > 0
+        lo = ay;
+    else
+        hi = ay;
+    end
+end
+ay = lo;
+
+[cap_f, cap_r, Fz, lift] = capacities(p, W_f, W_r, ay);
+dem_f = p.m * ay * dem_frac_f;
+dem_r = p.m * ay * dem_frac_r;
+
+out.ay_lim_g   = ay / p.g;
+out.v          = v;
+if (cap_f - dem_f) < (cap_r - dem_r), out.limiting = 'front';
+else,                                 out.limiting = 'rear';
+end
+out.wheel_lift = lift;
+out.Fz         = Fz;          % [N] fields: fo fi ro ri (outer/inner)
+out.cap_f = cap_f;  out.cap_r = cap_r;
+out.dem_f = dem_f;  out.dem_r = dem_r;
+out.W_f   = W_f;    out.W_r   = W_r;
+end
+
+
+function [cap_f, cap_r, Fz, lift] = capacities(p, W_f, W_r, ay)
+dF_f = p.LLTD       * p.m * ay * p.h_cg / p.t_f;
+dF_r = (1 - p.LLTD) * p.m * ay * p.h_cg / p.t_r;
+
+[cap_f, Fz.fo, Fz.fi, lf] = axle_cap(p, W_f, dF_f);
+[cap_r, Fz.ro, Fz.ri, lr] = axle_cap(p, W_r, dF_r);
+lift = lf || lr;
+end
+
+
+function [cap, F_out, F_in, lifted] = axle_cap(p, W, dF)
+F_out = W/2 + dF;
+F_in  = W/2 - dF;
+lifted = F_in <= 0;
+if lifted                       % inner wheel off the ground
+    F_out = W;  F_in = 0;
+    cap = mu_of(p, F_out) * F_out;
+else
+    cap = mu_of(p, F_out) * F_out + mu_of(p, F_in) * F_in;
+end
+end
+
+
+function mu = mu_of(p, Fz_N)
+% Load-sensitive friction from the TTC fit (mu_coef is in lbf), derated.
+% Clamped to the identified load range so extrapolation cannot go negative.
+Fz_lbf = min(max(Fz_N / 4.44822, 25), 450);
+mu = polyval(p.mu_coef, Fz_lbf) * p.mu_derate;
+end

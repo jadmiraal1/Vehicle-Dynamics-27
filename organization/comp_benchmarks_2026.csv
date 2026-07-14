@@ -1,0 +1,12 @@
+# FSAE Electric 2026 (Michigan) - real event benchmarks for the points model
+# source: fsae_2026_mi5_results.pdf (references/), printed 6/28/2026
+metric,value,notes
+accel_tmin_s,3.697,Wisconsin; Tmax=150%=5.546
+skidpad_tmin_s,4.782,RIT; Tmax=125%=5.978; implies best real car ~1.61 g
+autocross_tmin_s,43.937,RIT; Tmax=145%=63.710
+endurance_tmin_s,1312.281,Oregon St; 22 laps; avg 59.6 s/lap; Tmax=145%=1902.8
+endurance_laps,22,real event was 22 laps (~21.2 km at ~964 m/lap)
+endurance_finishers,19,teams completing 22 laps (of ~55 that passed inspection areas)
+efficiency_kwh_top_finishers,3.4-5.3,corrected meter energy of 22-lap finishers (Wisc 2.70; CalPoly 3.03; OSU 3.45 corrected / 5.30 raw)
+ucsd_2026_total,158.4,63rd place; statics only (cost 77.1 + pres 16.3 + design 65); DNA all dynamics
+ucsd_2026_car,64,Triton Racing EV
