@@ -8,6 +8,7 @@ TTC_Data/
 references/*
 !references/VD_physics_reference.md
 !references/code_pipeline.mermaid
+!references/codebase_guide.md
 
 # MATLAB litter
 *.asv
