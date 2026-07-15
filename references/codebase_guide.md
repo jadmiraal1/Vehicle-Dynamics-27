@@ -112,6 +112,13 @@ Key parameters and provenance:
 - `I_wheel = 0.217` — CAD (lb·in² converted; includes tire), `I_rotor` datasheet
 - `DI = 0.75` — dynamic index for Izz estimate, provisional pending CAD (#6)
 
+### `params_report.m` — parameter export for humans **(new)**
+`params_report()`. One-way dump of `vehicle_params()` into
+`organization/vehicle_params_report.xlsx` (name, value, tier, provisional
+flag, provenance note parsed from the source comments). For subteam leads
+who will never open MATLAB. Generated, never edited — regenerate after any
+parameter change.
+
 ### `build_tire_coeffs.m` — the tire→car promotion step **(new)**
 `T = build_tire_coeffs()`. Runs `pacejka_fit`, evaluates the design tire at the
 design corner load, computes the μ_x/μ_y anisotropy, and writes
