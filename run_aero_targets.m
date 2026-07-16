@@ -215,4 +215,12 @@ fill([xr(1) xr(2) xr(2) xr(1)], [min(P(:))-5 min(P(:))-5 max(P(:))+5 max(P(:))+5
 plot(cla_t, pts_t, 'p', 'MarkerSize', 16, 'MarkerFaceColor', [0.9 0.65 0], ...
      'MarkerEdgeColor', 'k', 'DisplayName', 'issued target');
 yline(pts0, '--', 'baseline', 'LineWidth', 1.0, 'HandleVisibility', 'off');
-xlabel('total ClA [m^2]');  ylabel('proje
+xlabel('total ClA [m^2]');  ylabel('projected dynamic points');
+title('Aero targets: points vs downforce along achievable package lines (real 2026 benchmarks)', ...
+      'FontWeight', 'bold');
+legend('Location', 'southeast');  grid on;
+outdir = fullfile(here, 'plots');
+if ~exist(outdir, 'dir'), mkdir(outdir); end
+saveas(f, fullfile(outdir, 'aero_targets.png'));
+close(f);
+end

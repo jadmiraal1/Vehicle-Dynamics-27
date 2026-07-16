@@ -64,21 +64,7 @@ p.m_driver_max = 95.25;  % heaviest PLAUSIBLE driver in testing [kg] = 200 lb + 
 % rollover figure as if it were the safe one.
 p.m        = p.m_car + p.m_driver;   % DERIVED - never hand-type this
 p.mass_dist_f = 0.40;      % static front mass fraction [-]
-
-% CG HEIGHT is now split car vs driver, like mass, and for the same reason:
-% the combined CG height depends on driver mass, so it cannot be one constant.
-% p.h_cg (the combined value every consumer reads) is DERIVED below.
-p.h_cg_car    = 0.2794;    % CAR-ONLY CG height above ground [m] = 11.0 in (TR25 measured).
-                           % Previously this same 0.2794 was the lumped p.h_cg -- a
-                           % car-only value standing in for car+driver. The driver is now
-                           % added on top (see DERIVED), so the combined CG the car
-                           % actually runs at is higher, and the rollover numbers moved.
-p.h_cg_driver = 0.35;      % DESIGN-driver CG height above ground [m] -- PROVISIONAL.
-                           % Reclined FSAE seating: hips low, torso/head carry the mass
-                           % just above the car CG. The rollover margin is sensitive to
-                           % this (~0.02x margin per cm), so it is deliberately a little
-                           % conservative (high). Measure via seat fixture or CAD; next
-                           % year's tub geometry changes it anyway.
+p.h_cg        = 0.2794;    % CG height above ground [m]
 
 % --- Geometry ---
 p.L   = 1.5621;    % wheelbase [m]
@@ -187,6 +173,8 @@ if bootstrap
     p.mu_anisotropy = NaN;
     p.Ca_coef       = [NaN NaN NaN];
     p.mu_coef       = [NaN NaN];
+    p.Fz_fit_max    = NaN;
+    p.mu_hiload_slope = NaN;
     p.tire_basis    = 'bootstrap (no grip)';
     p.tire_src_hash = '';
 else
@@ -200,26 +188,22 @@ else
     p.mu_y_raw      = T.mu_y_raw;       % curve-based peak lateral mu @ design load
     p.mu_anisotropy = T.mu_anisotropy;  % mu_x/mu_y, computed cross-tire transfer
     p.Ca_coef       = T.Ca_coef;        % Ca(Fz) quadratic [lbf/deg]
-    p.mu_coef       = T.mu_coef;        % mu(Fz) linear
+    p.mu_coef       = T.mu_coef;        % mu(Fz) linear, VALID ONLY to Fz_fit_max
+    p.Fz_fit_max    = T.Fz_fit_max;     % design tire's data edge [lbf]
+    p.mu_hiload_slope = T.mu_hiload_slope; % donor-informed slope above the edge
     p.tire_basis    = T.basis;          % 'pacejka-curve'
     p.tire_src_hash = T.src_hash;       % what vd_selftest checks for staleness
 end
+
+% High-load mu model above the design tire's data edge (see mu_of_load.m):
+%   'central' = donor-constrained (the 18in tires' measured flattening)
+%   'low'     = pessimistic blind-linear extension. Run both to get the band.
+p.tire_hiload = 'central';
 
 % ======================= DERIVED ========================================
 p.mu_x_raw = p.mu_y_raw * p.mu_anisotropy;  % follows the design tire automatically
 p.mu_y     = p.mu_y_raw * p.mu_derate;      % design peak lateral mu (derated) [-]
 p.mu_x     = p.mu_x_raw * p.mu_derate;      % design peak longitudinal mu (derated) [-]
-
-% Combined CG height = mass-weighted blend of car (h_cg_car) and driver
-% (h_cg_driver). Because the driver sits above the car CG, a HEAVIER driver
-% RAISES the combined CG -- which partly OPPOSES the mu-vs-load effect in the
-% rollover check (a heavier driver makes less mu per tire but rides higher).
-% p.h_cg is the design-driver value all consumers read; the light/heavy ends
-% are exposed so run_load_transfer_targets can bracket the rollover envelope.
-combine_h    = @(md) (p.m_car*p.h_cg_car + md*p.h_cg_driver) / (p.m_car + md);
-p.h_cg       = combine_h(p.m_driver);       % design-driver combined CG height [m]
-p.h_cg_light = combine_h(p.m_driver_min);   % lightest driver (rollover-binding end)
-p.h_cg_heavy = combine_h(p.m_driver_max);   % heaviest plausible driver
 
 p.a = p.L * (1 - p.mass_dist_f);            % CG to front axle [m]
 p.b = p.L * p.mass_dist_f;                  % CG to rear axle [m]
@@ -241,7 +225,7 @@ p.P_max = min(80e3, p.V_pack_nom * p.I_pack_max);
 p.v_max = (p.rpm_motor_max/p.gear_ratio) * (2*pi/60) * p.Re;
 
 % Design corner load [lbf] - the load the tire fit is evaluated AT. Exposed so
-% vd_selftest can check it against the artifact (see the mass note above: a
-% units slip here silently invalidates every grip number).
+% vd_selftest can check it against the artifact (a units slip here silently
+% invalidates every grip number).
 p.Fz_design_lbf = p.m * p.g / 4 / 4.44822;
 end

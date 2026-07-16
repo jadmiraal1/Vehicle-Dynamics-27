@@ -6,6 +6,7 @@ function tire_report()
 %   tire_load_sensitivity.png  cross-tire Ca(Fz) and mu(Fz)
 %   tire_friction_cloud.png    combined corner/drive cloud, 18in LC0
 %   tire_longitudinal.png      FX(kappa) MF fit, 18in LC0 drive+brake
+%   tire_extrapolation_band.png  load-sensitivity fits + central/low hi-load band
 % Physics: VD_physics_reference.md, sec 8 (forces, Mz, envelope exponent).
 
 p = vehicle_params();
@@ -190,7 +191,94 @@ title('Longitudinal MF fit - Hoosier 18.0x6.0-10 LC0, TTC R6, ~250 lbf, SA\appro
       'FontWeight', 'bold');
 save_fig(f, fullfile(outdir, 'tire_longitudinal.png'));
 
-fprintf('tire_report: 6 figures written to plots/\n');
+% Fig 7: high-load extrapolation band + side-by-side load-sensitivity fits
+% (the donor method: below Fz_fit_max = measured; above = central/low band)
+NPL   = 4.44822;
+Tdes  = R.(p.tire_data_prefix);
+edge  = p.Fz_fit_max;
+[slope_ill, cov] = donor_slope_illustrative(R, TIRES, edge, p.mu_coef);
+tmean    = mean([p.t_f p.t_r]);
+Fz_outer = (p.m*p.g/2 + p.m*p.g*p.mu_y*p.h_cg/tmean) / 2 / NPL;   % loaded outer tire
+xmax     = max(Fz_outer, cov) + 15;
+pl = p;  pl.tire_hiload = 'low';
+
+f = new_fig([60 60 1260 560]);
+
+% -- panel A: the four fits side by side (derated peak mu vs load) --
+axA = subplot(1,2,1); hold(axA,'on'); style(axA);
+for t = 1:4
+    T = R.(TIRES{t}); ok = ~isnan(T.Fz_lbf); ip = ok & T.peak_in_sweep;
+    plot(axA, T.Fz_lbf(ip), T.mu_peak(ip)*p.mu_derate, 'o', 'MarkerSize', 5, ...
+         'MarkerFaceColor', tire_c(t,:), 'Color', tire_c(t,:));
+    plot(axA, T.Fz_lbf(ok&~T.peak_in_sweep), T.mu_peak(ok&~T.peak_in_sweep)*p.mu_derate, ...
+         'o', 'MarkerSize', 6, 'Color', tire_c(t,:));   % hollow = peak beyond sweep
+    fe = linspace(45, max(T.Fz_lbf(ip)), 60);
+    plot(axA, fe, polyval(T.mu_coef, fe)*p.mu_derate, '-', 'LineWidth', 1.8, ...
+         'Color', tire_c(t,:), 'DisplayName', sprintf('%s (edge %.0f)', TIRES{t}, max(T.Fz_lbf(ip))));
+end
+xline(axA, p.Fz_design_lbf, ':', 'design load');
+xlabel(axA, 'F_Z  [lbf]'); ylabel(axA, 'derated peak \mu_Y');
+title(axA, 'Load-sensitivity fits, side by side');
+legend(axA, findobj(axA,'Type','line','-not','Marker','o'), 'Location','northeast','FontSize',8);
+
+% -- panel B: design-tire high-load extrapolation band --
+axB = subplot(1,2,2); hold(axB,'on'); style(axB);
+okd = ~isnan(Tdes.Fz_lbf) & Tdes.peak_in_sweep;
+plot(axB, Tdes.Fz_lbf(okd), Tdes.mu_peak(okd)*p.mu_derate, 'o', 'MarkerSize', 6, ...
+     'MarkerFaceColor', tire_c(1,:), 'Color', tire_c(1,:), 'DisplayName', 'LC0 measured');
+fe = linspace(45, edge, 60);
+plot(axB, fe, polyval(p.mu_coef, fe)*p.mu_derate, '-', 'Color', tire_c(1,:), ...
+     'LineWidth', 2.2, 'DisplayName', sprintf('measured fit (to %.0f lbf)', edge));
+xhi   = linspace(edge, xmax, 60);
+mu_lo = mu_of_load(pl, xhi);                 % blind-linear (pessimistic)
+mu_ce = mu_of_load(p,  xhi);                 % real central (may == low in fallback)
+mu_il = (polyval(p.mu_coef, edge) + slope_ill*(xhi-edge)) * p.mu_derate;  % donor, illustrative
+fill(axB, [xhi fliplr(xhi)], [mu_lo fliplr(max(mu_ce, mu_il))], [0.17 0.65 0.28], ...
+     'FaceAlpha', 0.12, 'EdgeColor', 'none', 'DisplayName', 'extrapolation band');
+plot(axB, xhi, mu_lo, '--', 'Color', [0.70 0.13 0.13], 'LineWidth', 2, 'DisplayName', 'LOW (blind-linear)');
+plot(axB, xhi, mu_ce, '-',  'Color', [0.17 0.65 0.28], 'LineWidth', 2, 'DisplayName', 'CENTRAL (mu\_of\_load)');
+plot(axB, xhi, mu_il, ':',  'Color', [0.17 0.65 0.28], 'LineWidth', 1.6, 'DisplayName', 'donor slope (illustrative)');
+for t = 2:4                                  % donor high-load points = the shape evidence
+    T = R.(TIRES{t}); hi = ~isnan(T.Fz_lbf) & T.peak_in_sweep & (T.Fz_lbf > edge-5);
+    plot(axB, T.Fz_lbf(hi), T.mu_peak(hi)*p.mu_derate, 's', 'MarkerSize', 5, ...
+         'MarkerFaceColor', tire_c(t,:), 'Color', tire_c(t,:), 'HandleVisibility','off');
+end
+xline(axB, edge, ':');  xline(axB, cov, ':', 'donor ceiling');  xline(axB, Fz_outer, ':', 'outer tire');
+xlabel(axB, 'F_Z  [lbf]'); ylabel(axB, 'derated peak \mu_Y');
+fellback = abs(p.mu_hiload_slope - p.mu_coef(1)) < 1e-9;
+if fellback
+    title(axB, {'Design-tire high-load band', ...
+                'FALLBACK: data edge \approx donor ceiling \Rightarrow real band \approx 0 (dotted = donor mechanism)'});
+else
+    title(axB, 'Design-tire high-load band (central vs low)');
+end
+legend(axB, 'Location', 'southwest', 'FontSize', 7.5);
+sgtitle('High-load extrapolation: fits side by side & the central/low band', 'FontWeight', 'bold');
+save_fig(f, fullfile(outdir, 'tire_extrapolation_band.png'));
+
+fprintf('tire_report: 7 figures written to plots/\n');
+end
+
+
+function [slope, cov] = donor_slope_illustrative(R, TIRES, edge, mu_coef_design)
+% Non-fallback donor slope, for the FIGURE only. Mirrors build_tire_coeffs'
+% donor_hiload_slope so the mechanism stays visible even when the real
+% mu_of_load has fallen back to the design slope (data edge near donor ceiling).
+poolF = []; poolS = []; cov = edge;
+for t = 1:numel(TIRES)
+    T = R.(TIRES{t}); ok = ~isnan(T.Fz_lbf) & T.peak_in_sweep;
+    if nnz(ok) < 2, continue; end
+    Fz = T.Fz_lbf(ok); mu = T.mu_peak(ok);
+    ref = interp1(Fz, mu, 150, 'linear', 'extrap');
+    poolF = [poolF Fz]; poolS = [poolS mu/ref]; cov = max(cov, max(Fz)); %#ok<AGROW>
+end
+if cov <= edge + 5, slope = mu_coef_design(1); return; end
+sh  = polyfit(poolF, poolS, 2);
+me  = polyval(mu_coef_design, edge);
+hiF = linspace(edge+15, cov, 4);
+himu = me * polyval(sh, hiF) ./ polyval(sh, edge);
+c = polyfit([edge hiF], [me himu], 1);
+slope = c(1);
 end
 
 

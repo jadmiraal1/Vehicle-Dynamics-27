@@ -38,7 +38,7 @@ end
 
 
 function h = md5_file(f)
-fid = fopen(f, 'r');
+fid = fopen(f, 'rb');
 if fid < 0
     error('vd_hash:missing', 'cannot open %s', f);
 end

@@ -75,8 +75,9 @@ end
 
 
 function mu = mu_of(p, Fz_N)
-% Load-sensitive friction from the TTC fit (mu_coef is in lbf), derated.
-% Clamped to the identified load range so extrapolation cannot go negative.
-Fz_lbf = min(max(Fz_N / 4.44822, 25), 450);
-mu = polyval(p.mu_coef, Fz_lbf) * p.mu_derate;
+% Load-sensitive friction, DERATED, via the shared evaluator. Below the design
+% tire's data edge this is the measured linear fit; above it, the donor-informed
+% flattening (mu_of_load.m) instead of a blind linear run-off. Set
+% p.tire_hiload = 'low' to bracket with the pessimistic linear extension.
+mu = mu_of_load(p, Fz_N / 4.44822);
 end

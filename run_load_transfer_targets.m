@@ -37,42 +37,31 @@ bias_f     = LT_braking.Wf / (LT_braking.Wf + LT_braking.Wr);
 fprintf('T-BB   front bias   : %.1f%% front  (at %.2f g braking: front %.0f of %.0f N)\n', ...
         100*bias_f, cfg.D_design, LT_braking.Wf, LT_braking.Wf + LT_braking.Wr);
 
-% DRIVER ENVELOPE: rollover is now driven by TWO opposing driver-mass effects,
-% so both ends are checked. Margin = (t/2)/(h*mu):
-%   - tire mu RISES as load falls  -> LIGHT driver makes more grip, tips sooner
-%   - combined CG h RISES with load -> HEAVY driver rides higher, tips sooner
-% The mu effect wins (light driver still binds), but the CG effect now offsets
-% most of the spread the mu-only story implied -- the ends are ~1% apart, not
-% the old ~2%. Each end uses its OWN combined CG height (p.h_cg_light/heavy),
-% not the design CG, so the numbers are self-consistent.
+% DRIVER ENVELOPE: rollover must be checked at the LIGHT driver, not the heavy one.
+% Margin = (t/2)/(h*mu), and tire mu RISES as load falls -- so a lighter driver
+% makes MORE grip per tire and the car tips SOONER. The design (heaviest-at-comp)
+% driver FLATTERS this number. Recompute mu at the light-driver corner load and
+% report the binding case, so nobody quotes the optimistic one.
 N_PER_LBF   = 4.44822;
 m_light     = p.m_car + p.m_driver_min;
-m_heavy     = p.m_car + p.m_driver_max;
 Fz_light    = m_light * p.g / 4 / N_PER_LBF;              % [lbf] per corner
-Fz_heavy    = m_heavy * p.g / 4 / N_PER_LBF;
 mu_light    = polyval(p.mu_coef, Fz_light) * p.mu_derate; % mu at THAT load
-mu_heavy    = polyval(p.mu_coef, Fz_heavy) * p.mu_derate;
-marg_design = (cfg.t_mean/2) / (p.h_cg       * cfg.mu);
-marg_light  = (cfg.t_mean/2) / (p.h_cg_light * mu_light);
-marg_heavy  = (cfg.t_mean/2) / (p.h_cg_heavy * mu_heavy);
-marg_bind   = min(marg_light, marg_heavy);
+marg_design = (cfg.t_mean/2) / (p.h_cg * cfg.mu);
+marg_light  = (cfg.t_mean/2) / (p.h_cg * mu_light);
 h_ceil_light = (cfg.t_mean/2) / (cfg.SF_rollover * mu_light);
 
-fprintf('T-CGH  driver envelope: margin %.2fx design | %.2fx LIGHT (%.0f lb) | %.2fx HEAVY (%.0f lb)\n', ...
-        marg_design, marg_light, p.m_driver_min/0.45359237, marg_heavy, p.m_driver_max/0.45359237);
+fprintf('T-CGH  driver envelope: rollover margin %.2fx design (%.0f lb driver) -> %.2fx LIGHT (%.0f lb)\n', ...
+        marg_design, p.m_driver/0.45359237, marg_light, p.m_driver_min/0.45359237);
 fprintf('       BINDING case is the LIGHT driver (less load -> more mu -> tips sooner).\n');
-fprintf('       ceiling at light driver: h_cg <= %.3f m  (current light h_cg %.3f m: %s)\n', ...
-        h_ceil_light, p.h_cg_light, ...
-        ternary(p.h_cg_light <= h_ceil_light, 'OK', 'EXCEEDS - flag to packaging'));
-if marg_bind < cfg.SF_rollover
-    fprintf(2, '       *** ROLLOVER MARGIN FAILS THE SF=%.2f TARGET (binding %.2f) ***\n', ...
-            cfg.SF_rollover, marg_bind);
+fprintf('       ceiling at light driver: h_cg <= %.3f m  (%s)\n', h_ceil_light, ...
+        ternary(p.h_cg <= h_ceil_light, 'OK', 'EXCEEDS - flag to packaging'));
+if marg_light < cfg.SF_rollover
+    fprintf(2, '       *** ROLLOVER MARGIN FAILS AT THE LIGHT DRIVER (%.2f < %.2f) ***\n', ...
+            marg_light, cfg.SF_rollover);
 end
 
 out.mu_light        = mu_light;
-out.mu_heavy        = mu_heavy;
 out.marg_light      = marg_light;
-out.marg_heavy      = marg_heavy;
 out.marg_design     = marg_design;
 out.h_cg_ceil_light = h_ceil_light;
 

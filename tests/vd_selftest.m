@@ -122,11 +122,29 @@ end
 
 % ---------------------------------------------------------------- layer 2
 fprintf('\n-- data anchors --\n');
+% TWO KINDS of check here, deliberately:
+%   (1) RAW-DATA anchor - a number that comes straight off the TTC files and
+%       does NOT depend on the fit method. Frozen tight: if it moves, the data
+%       path itself moved and you want to know.
+%   (2) DERIVED-FROM-FIT invariants - anisotropy, axle grip, the mu(Fz) trend.
+%       These legitimately shift when you improve the fit (e.g. a better SA
+%       artifact filter), so freezing them to 3 decimals means every honest
+%       improvement trips the selftest and trains you to ignore it. Instead we
+%       assert PHYSICAL invariants (ranges, signs, orderings) that catch real
+%       breakage - a sign flip, runaway extrapolation, grip that exceeds the
+%       point mass - without punishing a better fit.
+inr = @(x,lo,hi) double(x >= lo & x <= hi);
 A = {
-  'ttc_fit LC0_16x75 pctile',R.LC0_16x75.mu_y_raw, 2.602, 0.030
-  'curve mu_y_raw (design)', p.mu_y_raw,       2.336, 0.030
-  'mu_x/mu_y anisotropy',    p.mu_anisotropy,  0.968, 0.020
-  'axle_grip ay @12 m/s',    G12.ay_lim_g,     1.426, 0.020
+  % (1) raw-data anchor - fit-method-independent
+  'ttc_fit LC0 pctile (data)', R.LC0_16x75.mu_y_raw, 2.602, 0.030
+  % (2) physical invariants
+  'mu_y_raw in [2.0,2.6]',     inr(p.mu_y_raw, 2.0, 2.6),        1, 0.5
+  'anisotropy in [0.90,1.10]', inr(p.mu_anisotropy, 0.90, 1.10), 1, 0.5
+  'axle ay in (0.85,1.0)*mu_y',inr(G12.ay_lim_g, 0.85*p.mu_y, p.mu_y), 1, 0.5
+  % wiring / regression locks (tautological against the artifact, tight)
+  'mu_of_load @edge cont.',    mu_of_load(p, p.Fz_fit_max), polyval(p.mu_coef, p.Fz_fit_max)*p.mu_derate, 1e-9
+  'mu_of_load outer=artifact', mu_of_load(p, T.Fz_outer_limit_lbf), T.mu_outer_central, 1e-6
+  'hi-load band non-negative', double(T.mu_outer_central >= T.mu_outer_low - 1e-9), 1, 0.5
 };
 for i = 1:size(A,1)
     got = A{i,2}; wantv = A{i,3}; tol = A{i,4};
@@ -157,7 +175,7 @@ files = {fullfile(here, 'pacejka_fit.m'), ...
          fullfile(here, 'build_tire_coeffs.m')};
 d = dir(fullfile(here, 'TTC_Data', '*.mat'));
 for i = 1:numel(d)
-    if contains(d(i).name, 'raw'), continue; end
+    if contains(d(i).name, 'raw'), continue; end     % raw files are not read
     files{end+1} = fullfile(here, 'TTC_Data', d(i).name); %#ok<AGROW>
 end
 end

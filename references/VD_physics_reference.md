@@ -562,3 +562,41 @@ previously an empirical fudge. That is the fidelity ladder (section 9) doing its
 (fitted at IA = 0), no compliance. CoP fixed with speed, though a real undertray's CoP moves
 with ride height and pitch. Steady state only — the transient model (Simulink) inherits
 these axle capacities as its saturation limits.
+
+---
+
+## 12. Weight-distribution target — `run_wdist_targets.m`
+
+Static front/rear weight split (`mass_dist_f`, target #2). The model sweeps it through the
+mid-tier chain and reports four things per split: lateral grip (`axle_grip`), launch traction
+(`gg_envelope`, RWD), straight-line braking (per-axle, load-sensitive, ideal bias), and the
+LLTD needed to balance the limit.
+
+**The governing result is that steady-state metrics cannot find the optimum.** For this car:
+
+- **Lateral grip is flat** — ~1% across 38–52% front, front-limited throughout. Weight split
+  is not a grip lever.
+- **Braking mildly improves rearward** — braking transfers load forward, so a rear-static car
+  is *more* balanced under the brakes (`ΔW_long = m·a_x·h/L` unloads the rear, and a rear-heavy
+  static car ends nearer 50/50 at the decel limit, where load-sensitive total grip peaks).
+- **Launch traction strongly favours rearward** — RWD tractive force scales with the driven
+  (rear) axle load; ~+24% from 50% → 38% front.
+- **LLTD balances the limit across the whole range** — the roll-stiffness split has enough
+  authority to make any of these front-limited.
+
+So every steady-state axis favours rearward or is indifferent, and the sweep bottoms out at
+its rearward edge. **This is a blind spot, not an answer.** What actually caps rearward bias is
+*transient* yaw stability — turn-in response, trail-brake rotation, snap-oversteer margin —
+governed by the yaw-plane dynamics of §10, not by any steady-state limit. A car that is
+perfectly balanced at the steady-state limit can still be undriveable in transients if the CG
+is too far back (reduced static margin → the car wants to rotate).
+
+**Design rule.** Weight distribution is a packaging decision made once and hard to change; LLTD,
+aero balance and brake bias are per-session knobs. So set the weight split for what the knobs
+*cannot* fix — traction, packaging, and the transient-stability floor — and trim handling
+balance with LLTD afterward. Do not spend the weight split chasing steady-state balance.
+
+The target is therefore issued as "rearmost that transient stability allows", with a provisional
+front floor from FSAE convention (~44%) until the transient model (roadmap #5) or track data
+sets the real limit. The current 40% front is accel-optimal but below that floor and flagged for
+validation.
