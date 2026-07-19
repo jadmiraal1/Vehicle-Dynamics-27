@@ -7,6 +7,8 @@ function tire_report()
 %   tire_friction_cloud.png    combined corner/drive cloud, 18in LC0
 %   tire_longitudinal.png      FX(kappa) MF fit, 18in LC0 drive+brake
 %   tire_extrapolation_band.png  load-sensitivity fits + central/low hi-load band
+%   tire_mz_trail_by_tire.png  cross-tire aligning moment + pneumatic trail, 150 lbf
+%   tire_anisotropy_shape.png  18in LC0 peak back-derivation, visualized
 % Physics: VD_physics_reference.md, sec 8 (forces, Mz, envelope exponent).
 
 p = vehicle_params();
@@ -31,7 +33,7 @@ for t = 1:4
              'LineWidth', 1.7, 'Color', load_c(k,:), ...
              'DisplayName', sprintf('%.0f lbf', T.Fz_lbf(k)));
     end
-    title(TIRES{t}, 'Color', tire_c(t,:));
+    title(TIRES{t}, 'Color', tire_c(t,:), 'Interpreter', 'none');
     xlabel('slip angle |\alpha|  [deg]'); ylabel('|F_Y|  [lbf]');
     xlim([0 12.8]); ylim([0 720]);
 end
@@ -67,7 +69,7 @@ end
 xlabel('slip angle \alpha  [deg]'); ylabel('F_Z  [lbf]'); zlabel('F_Y  [lbf]');
 view(-134, 24); grid on; zlim([-780 700]);
 title(sprintf('%s lateral force surface F_Y(\\alpha, F_Z) — black ribs: measured bins', ...
-      p.tire_data_prefix), 'FontWeight', 'bold');
+      strrep(p.tire_data_prefix, '_', '\_')), 'FontWeight', 'bold');
 cb = colorbar('southoutside'); cb.Label.String = 'F_Y [lbf]';
 save_fig(f, fullfile(outdir, 'tire_surface.png'));
 
@@ -92,13 +94,13 @@ for k = 1:numel(loads)
          'LineWidth', 1.5, 'Color', load_c(k,:));
 end
 xlabel(ax1, 'slip angle |\alpha|  [deg]'); ylabel(ax1, 'M_Z  [lbf\cdotft]');
-title(ax1, 'Aligning moment — peaks early, dies at the limit');
+title(ax1, 'Aligning moment vs. slip angle');
 legend(ax1, 'Location', 'northeast', 'FontSize', 8);
 xlabel(ax2, 'slip angle |\alpha|  [deg]');
 ylabel(ax2, 'pneumatic trail t_p = M_Z/F_Y  [in]');
-title(ax2, 'Trail collapse = steering goes light'); ylim(ax2, [0 inf]);
+title(ax2, 'Pneumatic trail vs. slip angle'); ylim(ax2, [0 inf]);
 sgtitle(sprintf('%s aligning moment & pneumatic trail — TTC R8', ...
-        p.tire_data_prefix), 'FontWeight', 'bold');
+        p.tire_data_prefix), 'FontWeight', 'bold', 'Interpreter', 'none');
 save_fig(f, fullfile(outdir, 'tire_mz_trail.png'));
 
 % Fig 4: cross-tire load dependence
@@ -120,9 +122,9 @@ for t = 1:4
 end
 xlabel(ax1, 'F_Z  [lbf]'); ylabel(ax1, 'C_\alpha  [lbf/deg]');
 title(ax1, 'Cornering stiffness vs load');
-legend(ax1, findobj(ax1,'Type','line','-not','Marker','o'), 'Location', 'northwest');
+legend(ax1, findobj(ax1,'Type','line','-not','Marker','o'), 'Location', 'northwest', 'Interpreter', 'none');
 xlabel(ax2, 'F_Z  [lbf]'); ylabel(ax2, 'peak \mu_Y  [-]');
-title(ax2, 'Load sensitivity'); xline(ax2, 182.6, ':', 'design load');
+title(ax2, 'Load sensitivity'); xline(ax2, p.Fz_design_lbf, ':', 'design load');
 sgtitle('Candidate tire comparison — MF fits, TTC R8/R9', 'FontWeight', 'bold');
 save_fig(f, fullfile(outdir, 'tire_load_sensitivity.png'));
 
@@ -140,6 +142,7 @@ mux_d = R.long18.drive.mu_x;  mux_b = R.long18.brake.mu_x;
 T = R.(p.tire_data_prefix);  okb = find(~isnan(T.Fz_lbf));
 muy = T.mu_peak(okb(end));
 
+n_env = mean([R.long18.drive.n_envelope, R.long18.brake.n_envelope]); % measured combined-slip exponent (drive/brake avg) - do not hardcode
 f = new_fig([60 60 1250 640]);
 frames = {{nfx, nfy, 'tire axes'}, {nfx_v, nfy_v, 'vehicle axes (slip-angle rotated)'}};
 for q = 1:2
@@ -151,7 +154,7 @@ for q = 1:2
         plot(r*cos(th), r*sin(th), '-', 'Color', [0.78 0.78 0.78], 'LineWidth', 0.7);
     end
     tt = linspace(0, 2*pi, 400);
-    for nc = {{2.0, [0.84 0.37 0], '--'}, {1.8, [0 0.45 0.70], '-'}}
+    for nc = {{2.0, [0.84 0.37 0], '--'}, {n_env, [0 0.45 0.70], '-'}}
         n = nc{1}{1};
         cx = sign(cos(tt)).*abs(cos(tt)).^(2/n);
         cy = sign(sin(tt)).*abs(sin(tt)).^(2/n);
@@ -163,7 +166,7 @@ for q = 1:2
     title(frames{q}{3});
 end
 legend(subplot(1,2,1), {'', '', '', '', '', 'assumed ellipse n=2', ...
-       'measured envelope n\approx1.8'}, 'Location', 'southeast', 'FontSize', 8);
+       sprintf('measured envelope n\\approx%.2f', n_env)}, 'Location', 'southeast', 'FontSize', 8);
 cb = colorbar; cb.Label.String = 'F_Z [lbf]';
 sgtitle('Combined corner/drive friction cloud - Hoosier 18.0x6.0-10 LC0, TTC R6', 'FontWeight', 'bold');
 save_fig(f, fullfile(outdir, 'tire_friction_cloud.png'));
@@ -191,94 +194,139 @@ title('Longitudinal MF fit - Hoosier 18.0x6.0-10 LC0, TTC R6, ~250 lbf, SA\appro
       'FontWeight', 'bold');
 save_fig(f, fullfile(outdir, 'tire_longitudinal.png'));
 
-% Fig 7: high-load extrapolation band + side-by-side load-sensitivity fits
-% (the donor method: below Fz_fit_max = measured; above = central/low band)
-NPL   = 4.44822;
-Tdes  = R.(p.tire_data_prefix);
-edge  = p.Fz_fit_max;
-[slope_ill, cov] = donor_slope_illustrative(R, TIRES, edge, p.mu_coef);
-tmean    = mean([p.t_f p.t_r]);
-Fz_outer = (p.m*p.g/2 + p.m*p.g*p.mu_y*p.h_cg/tmean) / 2 / NPL;   % loaded outer tire
+% Fig 7: high-load extrapolation band + side-by-side load-sensitivity fits.
+% Panel B plots EXACTLY what mu_of_load returns - CENTRAL (donor-informed) and
+% LOW (blind-linear) - so the figure always agrees with the model and the
+% artifact. Above the data edge the law is LINEAR (mu(edge)+slope*(Fz-edge)),
+% not a curve, so it never runs away when extrapolated to the outer load. NOTE:
+% if the design edge has reached the donor ceiling the slope FALLS BACK to the
+% measured one, central == low, and the band is genuinely zero (flagged below).
+edge = p.Fz_fit_max;
+cov  = p.hiload_cov_lbf;         % SAME value donor_hiload_slope computed and mu_of_load respects - do not recompute here
+Fz_outer = p.Fz_outer_limit_lbf; % SAME value build_tire_coeffs.m computed - do not recompute here
 xmax     = max(Fz_outer, cov) + 15;
-pl = p;  pl.tire_hiload = 'low';
 
-f = new_fig([60 60 1260 560]);
+f = new_fig([80 80 1300 560]);
 
-% -- panel A: the four fits side by side (derated peak mu vs load) --
+% -- panel A: the four fits side by side --
 axA = subplot(1,2,1); hold(axA,'on'); style(axA);
 for t = 1:4
-    T = R.(TIRES{t}); ok = ~isnan(T.Fz_lbf); ip = ok & T.peak_in_sweep;
-    plot(axA, T.Fz_lbf(ip), T.mu_peak(ip)*p.mu_derate, 'o', 'MarkerSize', 5, ...
-         'MarkerFaceColor', tire_c(t,:), 'Color', tire_c(t,:));
-    plot(axA, T.Fz_lbf(ok&~T.peak_in_sweep), T.mu_peak(ok&~T.peak_in_sweep)*p.mu_derate, ...
-         'o', 'MarkerSize', 6, 'Color', tire_c(t,:));   % hollow = peak beyond sweep
+    T  = R.(TIRES{t});
+    ip = ~isnan(T.Fz_lbf) & T.peak_in_sweep;
+    ho = ~isnan(T.Fz_lbf) & ~T.peak_in_sweep;
+    plot(axA, T.Fz_lbf(ip), T.mu_peak(ip)*p.mu_derate, 'o', 'MarkerSize', 6, ...
+         'MarkerFaceColor', tire_c(t,:), 'Color', tire_c(t,:), 'HandleVisibility','off');
+    if any(ho)
+        plot(axA, T.Fz_lbf(ho), T.mu_peak(ho)*p.mu_derate, 'o', 'MarkerSize', 7, ...
+             'Color', tire_c(t,:), 'HandleVisibility','off');
+    end
     fe = linspace(45, max(T.Fz_lbf(ip)), 60);
-    plot(axA, fe, polyval(T.mu_coef, fe)*p.mu_derate, '-', 'LineWidth', 1.8, ...
+    plot(axA, fe, polyval(T.mu_coef, fe)*p.mu_derate, '-', 'LineWidth', 1.9, ...
          'Color', tire_c(t,:), 'DisplayName', sprintf('%s (edge %.0f)', TIRES{t}, max(T.Fz_lbf(ip))));
 end
-xline(axA, p.Fz_design_lbf, ':', 'design load');
-xlabel(axA, 'F_Z  [lbf]'); ylabel(axA, 'derated peak \mu_Y');
+xline(axA, p.Fz_design_lbf, ':', 'design load', 'HandleVisibility','off');
+xlim(axA, [40 280]); xlabel(axA, 'F_Z  [lbf]'); ylabel(axA, 'derated peak \mu_Y');
 title(axA, 'Load-sensitivity fits, side by side');
-legend(axA, findobj(axA,'Type','line','-not','Marker','o'), 'Location','northeast','FontSize',8);
+legend(axA, 'Location','northeast', 'FontSize',8, 'Interpreter', 'none');
 
-% -- panel B: design-tire high-load extrapolation band --
-axB = subplot(1,2,2); hold(axB,'on'); style(axB);
-okd = ~isnan(Tdes.Fz_lbf) & Tdes.peak_in_sweep;
-plot(axB, Tdes.Fz_lbf(okd), Tdes.mu_peak(okd)*p.mu_derate, 'o', 'MarkerSize', 6, ...
-     'MarkerFaceColor', tire_c(1,:), 'Color', tire_c(1,:), 'DisplayName', 'LC0 measured');
-fe = linspace(45, edge, 60);
+% -- panel B: LC0 high-load extrapolation band --
+axB  = subplot(1,2,2); hold(axB,'on'); style(axB);
+Tdes = R.(p.tire_data_prefix);
+okd  = ~isnan(Tdes.Fz_lbf) & Tdes.peak_in_sweep;
+fe   = linspace(45, edge, 60);
+xhi  = linspace(edge, xmax, 60);
+pl = p; pl.tire_hiload = 'low';
+ws = warning('off', 'mu_of_load:beyondDonorCoverage');   % expected here - xhi intentionally runs past cov
+mu_cen = mu_of_load(p,  xhi);                  % exactly the model's central branch
+mu_low = mu_of_load(pl, xhi);                  % ... and the pessimistic bracket
+warning(ws);
+fill(axB, [xhi fliplr(xhi)], [mu_low fliplr(mu_cen)], [0 0.55 0.30], ...
+     'FaceAlpha', 0.15, 'EdgeColor','none', 'DisplayName','extrapolation band');
 plot(axB, fe, polyval(p.mu_coef, fe)*p.mu_derate, '-', 'Color', tire_c(1,:), ...
-     'LineWidth', 2.2, 'DisplayName', sprintf('measured fit (to %.0f lbf)', edge));
-xhi   = linspace(edge, xmax, 60);
-mu_lo = mu_of_load(pl, xhi);                 % blind-linear (pessimistic)
-mu_ce = mu_of_load(p,  xhi);                 % real central (may == low in fallback)
-mu_il = (polyval(p.mu_coef, edge) + slope_ill*(xhi-edge)) * p.mu_derate;  % donor, illustrative
-fill(axB, [xhi fliplr(xhi)], [mu_lo fliplr(max(mu_ce, mu_il))], [0.17 0.65 0.28], ...
-     'FaceAlpha', 0.12, 'EdgeColor', 'none', 'DisplayName', 'extrapolation band');
-plot(axB, xhi, mu_lo, '--', 'Color', [0.70 0.13 0.13], 'LineWidth', 2, 'DisplayName', 'LOW (blind-linear)');
-plot(axB, xhi, mu_ce, '-',  'Color', [0.17 0.65 0.28], 'LineWidth', 2, 'DisplayName', 'CENTRAL (mu\_of\_load)');
-plot(axB, xhi, mu_il, ':',  'Color', [0.17 0.65 0.28], 'LineWidth', 1.6, 'DisplayName', 'donor slope (illustrative)');
-for t = 2:4                                  % donor high-load points = the shape evidence
-    T = R.(TIRES{t}); hi = ~isnan(T.Fz_lbf) & T.peak_in_sweep & (T.Fz_lbf > edge-5);
-    plot(axB, T.Fz_lbf(hi), T.mu_peak(hi)*p.mu_derate, 's', 'MarkerSize', 5, ...
-         'MarkerFaceColor', tire_c(t,:), 'Color', tire_c(t,:), 'HandleVisibility','off');
+     'LineWidth', 2.4, 'DisplayName', sprintf('measured fit (<= %.0f lbf)', edge));
+plot(axB, xhi, mu_low, '--', 'Color', [0.75 0.15 0.15], 'LineWidth', 2, 'DisplayName','LOW (blind-linear)');
+plot(axB, xhi, mu_cen, '-',  'Color', [0 0.55 0.30], 'LineWidth', 2, 'DisplayName','CENTRAL (mu\_of\_load)');
+plot(axB, Tdes.Fz_lbf(okd), Tdes.mu_peak(okd)*p.mu_derate, 'o', 'MarkerSize', 7, ...
+     'MarkerFaceColor', tire_c(1,:), 'Color', tire_c(1,:), 'DisplayName','LC0 measured');
+for t = 2:4
+    T = R.(TIRES{t}); hi = ~isnan(T.Fz_lbf) & T.peak_in_sweep & (T.Fz_lbf > edge-6);
+    if any(hi)
+        plot(axB, T.Fz_lbf(hi), T.mu_peak(hi)*p.mu_derate, 's', 'MarkerSize', 6, ...
+             'MarkerFaceColor', tire_c(t,:), 'Color', tire_c(t,:), 'HandleVisibility','off');
+    end
 end
-xline(axB, edge, ':');  xline(axB, cov, ':', 'donor ceiling');  xline(axB, Fz_outer, ':', 'outer tire');
+xline(axB, edge, ':', 'HandleVisibility','off');
+xline(axB, Fz_outer, ':', 'outer tire', 'HandleVisibility','off');
+xlim(axB, [40 xmax]); ylim(axB, [1.30 1.90]);
 xlabel(axB, 'F_Z  [lbf]'); ylabel(axB, 'derated peak \mu_Y');
-fellback = abs(p.mu_hiload_slope - p.mu_coef(1)) < 1e-9;
-if fellback
-    title(axB, {'Design-tire high-load band', ...
-                'FALLBACK: data edge \approx donor ceiling \Rightarrow real band \approx 0 (dotted = donor mechanism)'});
-else
-    title(axB, 'Design-tire high-load band (central vs low)');
-end
-legend(axB, 'Location', 'southwest', 'FontSize', 7.5);
-sgtitle('High-load extrapolation: fits side by side & the central/low band', 'FontWeight', 'bold');
+title(axB, 'LC0 high-load band: central vs low');
+legend(axB, 'Location','northeast', 'FontSize',8);
+sgtitle('High-load extrapolation: fits side by side & the central/low band', 'FontWeight','bold');
 save_fig(f, fullfile(outdir, 'tire_extrapolation_band.png'));
 
-fprintf('tire_report: 7 figures written to plots/\n');
+% Fig 8: aligning moment + pneumatic trail, ACROSS TIRES (Fig 3 only ever
+% looked at the design tire). One representative load (150 lbf, the middle
+% TTC bin) so all four tires compare at a common condition.
+REP_LOAD = 150;
+f = new_fig([100 60 1000 420]);
+ax1 = subplot(1,2,1); hold(ax1,'on'); style(ax1);
+ax2 = subplot(1,2,2); hold(ax2,'on'); style(ax2);
+for t = 1:4
+    Dt = load_with_mz(fullfile(fileparts(mfilename('fullpath')), 'TTC_Data'), ...
+                       [TIRES{t} '_*.mat']);
+    Fz_mag_t = -Dt.FZ;
+    base_t = (abs(Dt.FX./Dt.FZ) < 0.10) & (Fz_mag_t > 30) & (abs(Dt.IA) < 1.5) ...
+             & (Dt.P > 9) & (Dt.P < 13) & ~((Dt.SA > 5) & (Dt.SA < 7));
+    sel_t = base_t & (abs(Fz_mag_t - REP_LOAD) < REP_LOAD*0.15);
+    if nnz(sel_t) < 3000, continue; end   % same density floor as Fig 3
+    [xs, mz] = odd_bins(Dt.SA(sel_t),  Dt.MZ(sel_t));
+    [~,  fy] = odd_bins(Dt.SA(sel_t), -Dt.FY(sel_t));
+    n = min(numel(mz), numel(fy));
+    plot(ax1, xs(1:n), mz(1:n), 'o-', 'MarkerSize', 3, 'LineWidth', 1.5, ...
+         'Color', tire_c(t,:), 'DisplayName', TIRES{t});
+    plot(ax2, xs(3:n), mz(3:n)./fy(3:n)*12, 'o-', 'MarkerSize', 3, ...
+         'LineWidth', 1.5, 'Color', tire_c(t,:));
 end
+xlabel(ax1, 'slip angle |\alpha|  [deg]'); ylabel(ax1, 'M_Z  [lbf\cdotft]');
+title(ax1, 'Aligning moment vs. slip angle');
+legend(ax1, 'Location', 'northeast', 'FontSize', 8, 'Interpreter', 'none');
+xlabel(ax2, 'slip angle |\alpha|  [deg]');
+ylabel(ax2, 'pneumatic trail t_p = M_Z/F_Y  [in]');
+title(ax2, 'Pneumatic trail vs. slip angle'); ylim(ax2, [0 inf]);
+sgtitle(sprintf('Cross-tire aligning moment & pneumatic trail — TTC R8, %.0f lbf', REP_LOAD), ...
+        'FontWeight', 'bold');
+save_fig(f, fullfile(outdir, 'tire_mz_trail_by_tire.png'));
 
+% Fig 9: the anisotropy shape correction, visualized. build_tire_coeffs.m
+% back-derives the 18in LC0's lateral PEAK from its measured value at 6deg,
+% using the design tire's own MF curve shape at the load-matched Fz (Fz_lat6)
+% as the correction factor (shape6 = value@6deg / curve peak). This is the
+% one nontrivial derived number in the whole pipeline with no supporting
+% figure - draw the curve, mark the 6deg point, mark the implied peak.
+f = new_fig([80 80 900 620]);
+ax = axes(f); hold(ax, 'on'); style(ax);
+aa9 = linspace(0, 20, 400);
+curve9 = R.eval(aa9, p.Fz_lat6);          % design tire's MF curve AT THE LOAD-MATCHED Fz
+[peak9, ipk] = max(curve9);
+plot(ax, aa9, curve9, '-', 'Color', tire_c(1,:), 'LineWidth', 2.2, ...
+     'DisplayName', sprintf('%s curve @ Fz=%.0f lbf (load-matched)', strrep(p.tire_data_prefix,'_','\_'), p.Fz_lat6));
+plot(ax, aa9(ipk), peak9, '^', 'MarkerSize', 9, 'MarkerFaceColor', tire_c(1,:), ...
+     'Color', tire_c(1,:), 'DisplayName', sprintf('curve peak = %.3f', peak9));
+plot(ax, 6.0, p.mu_y_at6, 's', 'MarkerSize', 9, 'MarkerFaceColor', [0.84 0.37 0], ...
+     'Color', [0.84 0.37 0], 'DisplayName', sprintf('18in LC0 measured @ 6deg = %.3f', p.mu_y_at6));
+plot(ax, [6.0 6.0], [0 p.mu_y_at6], ':', 'Color', [0.6 0.6 0.6], 'HandleVisibility','off');
+yline(ax, p.mu_y_18_peak, '--', sprintf('implied peak = mu\\_y\\_at6 / shape6 = %.3f', p.mu_y_18_peak), ...
+      'Color', [0.84 0.37 0], 'LabelHorizontalAlignment','left');
+xlabel(ax, 'slip angle |\alpha|  [deg]'); ylabel(ax, '\mu_Y  [-]');
+xlim(ax, [0 20]);
+legend(ax, 'Location', 'southeast', 'FontSize', 8);
+title(ax, sprintf('shape6 = %.4f  (curve value @6deg / curve peak, both at Fz=%.0f lbf)', ...
+      p.shape6, p.Fz_lat6));
+sgtitle('Anisotropy shape correction — 18in LC0 peak back-derived from its 6deg point', ...
+        'FontWeight', 'bold');
+save_fig(f, fullfile(outdir, 'tire_anisotropy_shape.png'));
 
-function [slope, cov] = donor_slope_illustrative(R, TIRES, edge, mu_coef_design)
-% Non-fallback donor slope, for the FIGURE only. Mirrors build_tire_coeffs'
-% donor_hiload_slope so the mechanism stays visible even when the real
-% mu_of_load has fallen back to the design slope (data edge near donor ceiling).
-poolF = []; poolS = []; cov = edge;
-for t = 1:numel(TIRES)
-    T = R.(TIRES{t}); ok = ~isnan(T.Fz_lbf) & T.peak_in_sweep;
-    if nnz(ok) < 2, continue; end
-    Fz = T.Fz_lbf(ok); mu = T.mu_peak(ok);
-    ref = interp1(Fz, mu, 150, 'linear', 'extrap');
-    poolF = [poolF Fz]; poolS = [poolS mu/ref]; cov = max(cov, max(Fz)); %#ok<AGROW>
-end
-if cov <= edge + 5, slope = mu_coef_design(1); return; end
-sh  = polyfit(poolF, poolS, 2);
-me  = polyval(mu_coef_design, edge);
-hiF = linspace(edge+15, cov, 4);
-himu = me * polyval(sh, hiF) ./ polyval(sh, edge);
-c = polyfit([edge hiF], [me himu], 1);
-slope = c(1);
+fprintf('tire_report: 9 figures written to plots/\n');
 end
 
 

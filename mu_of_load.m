@@ -19,30 +19,21 @@ function mu = mu_of_load(p, Fz_lbf)
 % the three 18in tires (incl. the same LC0 compound) carry lateral data to
 % ~322-360 lbf, and their peak-in-sweep mu(Fz) is nearly flat above 200 lbf
 % (GY: 2.462 @200 -> 2.413 @264). Crucially the NORMALIZED load-sensitivity
-% shape mu(Fz)/mu(150) agrees across all four tires to ~1-1.5% (tighter at low load, ~1.5% at 200 lbf, LC0-driven), so that shape is a
-% tire-property we can transfer to the design tire even though absolute mu is
-% not. build_tire_coeffs extracts a gentle high-load slope from that pooled
-% shape and stores it as p.mu_hiload_slope.
+% shape mu(Fz)/mu(150) agrees across all four tires to ~1-1.5% (tighter at low
+% load, ~1.5% at 200 lbf, LC0-driven), so that shape is a tire-property we can
+% transfer to the design tire even though absolute mu is not. build_tire_coeffs
+% extracts a gentle high-load slope from that pooled shape -> p.mu_hiload_slope.
 %
 % PIECEWISE LAW (continuous at the edge):
 %   Fz <= p.Fz_fit_max :  measured line          polyval(mu_coef, Fz)
 %   Fz >  p.Fz_fit_max :  mu(edge) + slope_hi*(Fz - edge)     [donor-informed]
 %
 % It is still extrapolation above the ~264 lbf donor ceiling - just far better
-% supported than a straight line. The truncated 250-lbf measurement on the
-% design tire itself (mu >= 2.35 raw, peak beyond sweep) sits ABOVE both the
-% linear and the donor curve, which is independent evidence the linear tail is
-% too low.
-%
-% BAND / bracketing. Set p.tire_hiload = 'low' to force the pessimistic blind-
-% linear extension instead of the donor-constrained central estimate. Run the
-% skidpad / lap sim both ways and report the band: the gap IS the honest
-% extrapolation uncertainty, and pretending it is zero is the real error.
+% supported than a straight line. BAND / bracketing: set p.tire_hiload = 'low'
+% to force the pessimistic blind-linear extension instead; the gap between the
+% two IS the honest extrapolation uncertainty.
 
 % --- Input validation -----------------------------------------------------
-% All three callers are supposed to build p from the same tire_coeffs.mat, so
-% a missing field means a stale/incomplete load, not a real edge case. Fail
-% with a message that names the field, not a generic "undefined" crash.
 required = {'Fz_fit_max', 'mu_coef', 'mu_derate'};
 for k = 1:numel(required)
     if ~isfield(p, required{k})
@@ -63,7 +54,7 @@ if strcmp(mode, 'central') && ~isfield(p, 'mu_hiload_slope')
         'p.tire_hiload = ''central'' requires p.mu_hiload_slope (from donor_hiload_slope).');
 end
 
-Fz   = max(Fz_lbf(:).', 25);          % row, floor at 25 lbf (below any data)
+Fz = max(Fz_lbf(:).', 25);          % row, floor at 25 lbf (below any data)
 if any(Fz_lbf(:) < 25)
     warning('mu_of_load:belowFloor', ...
         'Fz_lbf contains values below 25 lbf (min %.1f) - clamped to 25. Check for a units or sign error.', ...
@@ -79,9 +70,7 @@ else
     mu_raw(hi) = polyval(p.mu_coef, edge) + p.mu_hiload_slope .* (Fz(hi) - edge);
 
     % Surface the "beyond even donor coverage" warning here, not just in
-    % build_tire_coeffs, so axle_grip / the tire report get it too - this is
-    % supposed to be the single evaluator, so its safety nets shouldn't be
-    % weaker than the one caller that happens to print extra diagnostics.
+    % build_tire_coeffs, so axle_grip / the tire report get it too.
     if isfield(p, 'hiload_cov_lbf') && any(Fz(hi) > p.hiload_cov_lbf)
         n_beyond = nnz(Fz(hi) > p.hiload_cov_lbf);
         warning('mu_of_load:beyondDonorCoverage', ...
@@ -92,10 +81,9 @@ else
     end
 end
 
-% Physical floor: a straight-line extrapolation (especially 'low' mode, by
-% design) can run to zero or negative at a high enough load. mu <= 0 is not a
-% tire behavior, it's the extrapolation failing - clamp and say so rather than
-% handing a nonphysical number downstream silently.
+% Physical floor: a straight-line extrapolation (especially 'low' mode) can run
+% to zero or negative at a high enough load. mu <= 0 is not tire behavior, it is
+% the extrapolation failing - clamp and say so rather than passing it downstream.
 MU_FLOOR = 0.1;
 below = mu_raw < MU_FLOOR;
 if any(below)

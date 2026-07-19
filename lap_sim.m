@@ -5,8 +5,9 @@ function [v, t, E] = lap_sim(p, s, kappa, v0, closed)
 %   optional E: energy accounting struct (Wh; drive at wheel/accumulator,
 %   braking energy as regen upper bound).
 %   v0 : start speed (m/s), [] to free it.  closed : wrap the lap (default true).
-% Method (corner-speed ceiling, forward/backward passes, friction ellipse):
-% VD_physics_reference.md, section 7.
+% Method (corner-speed ceiling, forward/backward passes, friction ellipse
+% with the MEASURED exponent n from the 18in LC0 combined sweeps, not a
+% hard-coded circle): VD_physics_reference.md, section 7.
 
 if nargin < 4, 
     v0 = []; 
@@ -23,19 +24,22 @@ vlim = arrayfun(@(k) corner_speed(p, k), kappa);   % per-point speed ceiling
 v = vlim;
 if ~isempty(v0), v(1) = v0; end
 
+n_d = ellipse_exp(p, 'drive');   % friction-ellipse exponent, accel (measured)
+n_b = ellipse_exp(p, 'brake');   % ... braking
+
 niter = 3;  if ~closed, niter = 1; end
 for it = 1:niter
     for i = 1:n-1                                   % forward / accelerate
         G   = gg_envelope(p, v(i));
         used = min(v(i)^2*kappa(i) / max(G.ay*p.g, 1e-6), 1.0);
-        frac = sqrt(max(0, 1 - used^2));            % friction-ellipse margin
+        frac = (max(0, 1 - used^n_d))^(1/n_d);      % friction ellipse, exponent n_d
         ax  = G.ax_accel * p.g * frac;
         v(i+1) = min(vlim(i+1), sqrt(max(v(i)^2 + 2*ax*ds(i), 0))); % min between vlim and accel velocity based on curvature only
     end
     for i = n:-1:2                                  % backward / brake
         G   = gg_envelope(p, v(i));
         used = min(v(i)^2*kappa(i) / max(G.ay*p.g, 1e-6), 1.0);
-        frac = sqrt(max(0, 1 - used^2));
+        frac = (max(0, 1 - used^n_b))^(1/n_b);      % friction ellipse, exponent n_b
         ax  = G.ax_brake * p.g * frac;
         v(i-1) = min(v(i-1), sqrt(v(i)^2 + 2*ax*ds(i-1))); % minimum between accel pass velocity and braking velocity based on curvature only
     end
@@ -47,6 +51,29 @@ t  = sum(ds ./ max(vm, 0.1));
 
 if nargout > 2
     E = lap_energy(p, v, s);
+end
+end
+
+
+function n = ellipse_exp(p, mode)
+% Combined-grip friction-ellipse exponent: (ax/axmax)^n + (ay/aymax)^n = 1.
+% n is MEASURED from the 18in LC0 held-SA combined sweeps (pacejka_fit ->
+% tire_coeffs.mat) and borrowed to the 16in design tire - the envelope SHAPE is
+% a construction property that transfers, like the mu_x/mu_y anisotropy.
+%   n = 2   -> the classic circle (what this used to hard-code)
+%   n ~ 1.8 -> the measured value: a POINTIER envelope, i.e. LESS simultaneous
+%              grip at combined states, so lap times come out a touch slower.
+% CAVEAT: the measured n is a LOWER BOUND (SA only swept to ~6 deg), so the true
+% envelope is somewhere between it and ~2.0-2.2; this is therefore the
+% conservative edge. Falls back to 2 (circle) if the exponent isn't loaded.
+switch lower(mode)
+    case 'brake', f = 'n_env_brake';
+    otherwise,    f = 'n_env_drive';
+end
+if isfield(p, f) && isfinite(p.(f)) && p.(f) > 0
+    n = p.(f);
+else
+    n = 2;   % no measured exponent -> circle
 end
 end
 
