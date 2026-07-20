@@ -78,6 +78,14 @@ p.CdA = 0.9527;    % drag coeff x area [m^2]
 p.LLTD          = 0.60;  % lateral load transfer distribution, front frac [-] PROVISIONAL
 p.aero_df_front = 0.40;  % front share of downforce (CoP) [-] PROVISIONAL
 
+% --- Model selection ---
+% Lateral grip model for corner_speed / lap_sim, via ay_limit.m:
+%   'axle'      load-sensitive per-axle limit (realistic; accounts for the grip
+%               LOST to lateral load transfer). DEFAULT.
+%   'pointmass' constant-mu g-g envelope (optimistic; over-predicts cornering).
+%               For before/after comparison only.
+p.grip_model = 'axle';
+
 % ======================= LOADED (generated artifact) =====================
 if bootstrap
     p.mu_y_raw      = NaN;
@@ -95,6 +103,8 @@ if bootstrap
     p.mu_y_at6      = NaN;
     p.Fz_lat6       = NaN;
     p.mu_x_18       = NaN;
+    p.n_env_drive   = NaN;
+    p.n_env_brake   = NaN;
     p.tire_basis    = 'bootstrap (no grip)';
     p.tire_src_hash = '';
 else
@@ -120,6 +130,8 @@ else
     p.mu_y_at6      = T.mu_y_at6;       % 18in LC0 measured mu_y at 6deg (raw, not peak)
     p.Fz_lat6       = T.Fz_lat6;        % load the 18in lateral data was actually taken at [lbf]
     p.mu_x_18       = T.mu_x_18;        % 18in LC0 mean drive/brake mu_x
+    p.n_env_drive   = T.n_env_drive;    % friction-ellipse exponent, DRIVE (measured 18in) - lap_sim ellipse_exp reads this; absence silently made it a circle
+    p.n_env_brake   = T.n_env_brake;    % friction-ellipse exponent, BRAKE (measured 18in)
     p.tire_basis    = T.basis;          % 'pacejka-curve'
     p.tire_src_hash = T.src_hash;       % what vd_selftest checks for staleness
 end

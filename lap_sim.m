@@ -8,6 +8,11 @@ function [v, t, E] = lap_sim(p, s, kappa, v0, closed)
 % Method (corner-speed ceiling, forward/backward passes, friction ellipse
 % with the MEASURED exponent n from the 18in LC0 combined sweeps, not a
 % hard-coded circle): VD_physics_reference.md, section 7.
+% LATERAL LIMIT: both the corner-speed ceiling (vlim) and the ellipse's ay_max
+% come from ay_limit.m (p.grip_model). Default 'axle' = load-sensitive, so
+% cornering respects the grip lost to load transfer; 'pointmass' reproduces the
+% old optimistic constant-mu lap. The LONGITUDINAL edges (ax_accel, ax_brake)
+% are still the point-mass gg_envelope - this upgrade is lateral-only.
 
 if nargin < 4, 
     v0 = []; 
@@ -30,15 +35,17 @@ n_b = ellipse_exp(p, 'brake');   % ... braking
 niter = 3;  if ~closed, niter = 1; end
 for it = 1:niter
     for i = 1:n-1                                   % forward / accelerate
-        G   = gg_envelope(p, v(i));
-        used = min(v(i)^2*kappa(i) / max(G.ay*p.g, 1e-6), 1.0);
+        G     = gg_envelope(p, v(i));               % longitudinal edges (point mass)
+        aymax = ay_limit(p, v(i));                  % LATERAL edge (p.grip_model)
+        used = min(v(i)^2*kappa(i) / max(aymax*p.g, 1e-6), 1.0);
         frac = (max(0, 1 - used^n_d))^(1/n_d);      % friction ellipse, exponent n_d
         ax  = G.ax_accel * p.g * frac;
         v(i+1) = min(vlim(i+1), sqrt(max(v(i)^2 + 2*ax*ds(i), 0))); % min between vlim and accel velocity based on curvature only
     end
     for i = n:-1:2                                  % backward / brake
-        G   = gg_envelope(p, v(i));
-        used = min(v(i)^2*kappa(i) / max(G.ay*p.g, 1e-6), 1.0);
+        G     = gg_envelope(p, v(i));               % longitudinal edges (point mass)
+        aymax = ay_limit(p, v(i));                  % LATERAL edge (p.grip_model)
+        used = min(v(i)^2*kappa(i) / max(aymax*p.g, 1e-6), 1.0);
         frac = (max(0, 1 - used^n_b))^(1/n_b);      % friction ellipse, exponent n_b
         ax  = G.ax_brake * p.g * frac;
         v(i-1) = min(v(i-1), sqrt(v(i)^2 + 2*ax*ds(i-1))); % minimum between accel pass velocity and braking velocity based on curvature only

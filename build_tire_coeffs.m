@@ -101,8 +101,10 @@ T.mu_y_at6    = R.long18.mu_y_at6;
 T.Fz_lat6     = Fz_lat;
 T.mu_x_drive  = R.long18.drive.mu_x;
 T.mu_x_brake  = R.long18.brake.mu_x;
-T.n_envelope   = R.long18.drive.n_envelope;   % combined-slip ellipse exponent, DRIVE
+T.n_env_drive  = R.long18.drive.n_envelope;   % combined-slip ellipse exponent, DRIVE
 T.n_env_brake  = R.long18.brake.n_envelope;   % ... BRAKE (18in LC0 held-SA sweeps)
+% NOTE: field is n_env_drive (was n_envelope) so both exponents share one naming
+% pattern and vehicle_params can copy the PAIR into p for lap_sim's ellipse_exp.
 
 % --- Provenance ----------------------------------------------------------
 T.tire_id          = p.tire_id;

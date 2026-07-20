@@ -85,12 +85,27 @@ fprintf('%-32s INFO  (%s)\n', 'grip basis', T.basis);
 
 % ---------------------------------------------------------------- layer 1
 p = vehicle_params();
+
+% WIRING GUARD (root cause of the silent-circle bug): the friction-ellipse
+% exponents must actually reach p, or lap_sim's ellipse_exp falls back to n=2
+% (a CIRCLE) with NO error. Fail loudly and specifically if either is missing.
+for fld = {'n_env_drive','n_env_brake'}
+    if ~isfield(p, fld{1}) || ~isfinite(p.(fld{1}))
+        error('vd_selftest:ellipseExpUnwired', ...
+            ['p.%s is missing/NaN - vehicle_params did not load it, so lap_sim ' ...
+             'silently uses the n=2 CIRCLE. Re-run build_tire_coeffs and check the ' ...
+             'vehicle_params LOADED block.'], fld{1});
+    end
+end
+
 evalc('out  = run_load_transfer_targets();');
 evalc('R    = ttc_fit();');
 evalc('out2 = run_gg_targets();');
 evalc('H    = run_handling_targets();');
 gg0 = gg_envelope(p, 0);
 G12 = axle_grip(p, 12);
+g12  = gg_envelope(p, 12);
+p_pm = p;  p_pm.grip_model = 'pointmass';   % same car, point-mass lateral limit
 
 C = {
   'mu_y = raw * derate',       p.mu_y,            p.mu_y_raw * p.mu_derate
@@ -109,6 +124,11 @@ C = {
   'K = Wf/Caf - Wr/Car',       H.K_deg_per_g,     (p.Wf_static/H.Ca_axle_f - p.Wr_static/H.Ca_axle_r)*180/pi
   'Ca_axle from ARTIFACT',     H.Ca_coef_source,  1
   'axle Fy demand = b/L',      G12.dem_f/(p.m*G12.ay_lim_g*p.g), p.b/p.L
+  'grip_model default axle',   double(strcmp(p.grip_model,'axle')),  1
+  'ay_limit axle = axle_grip', ay_limit(p, 12),    G12.ay_lim_g
+  'ay_limit pmass = gg.ay',    ay_limit(p_pm, 12), g12.ay
+  'n_env_drive loaded (p=art)',p.n_env_drive,      T.n_env_drive
+  'n_env_brake loaded (p=art)',p.n_env_brake,      T.n_env_brake
 };
 
 fprintf('\n-- formula wiring --\n');
@@ -141,6 +161,9 @@ A = {
   'mu_y_raw in [2.0,2.6]',     inr(p.mu_y_raw, 2.0, 2.6),        1, 0.5
   'anisotropy in [0.90,1.10]', inr(p.mu_anisotropy, 0.90, 1.10), 1, 0.5
   'axle ay in (0.85,1.0)*mu_y',inr(G12.ay_lim_g, 0.85*p.mu_y, p.mu_y), 1, 0.5
+  'axle limit < point mass',   double(ay_limit(p,12) < ay_limit(p_pm,12)), 1, 0.5
+  'ellipse exp drive not n=2', inr(p.n_env_drive, 1.5, 1.98), 1, 0.5
+  'ellipse exp brake not n=2', inr(p.n_env_brake, 1.5, 1.98), 1, 0.5
   % wiring / regression locks (tautological against the artifact, tight)
   'mu_of_load @edge cont.',    mu_of_load(p, p.Fz_fit_max), polyval(p.mu_coef, p.Fz_fit_max)*p.mu_derate, 1e-9
   'mu_of_load outer=artifact', mu_of_load(p, T.Fz_outer_limit_lbf), T.mu_outer_central, 1e-6

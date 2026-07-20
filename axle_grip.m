@@ -21,9 +21,32 @@ W_r  = p.m * p.g * (1 - p.mass_dist_f) + (1 - p.aero_df_front) * DF;
 dem_frac_f = p.b / p.L;
 dem_frac_r = p.a / p.L;
 
-% Bisection on ay: capacity - demand crosses zero once
-lo = 0;  hi = 45;                                      % [m/s^2]
-for it = 1:60
+% Bisection on ay: capacity - demand crosses zero once. Bracket is physically
+% bounded, not an arbitrary wide guess: the axle model can only LOSE grip
+% relative to the constant-mu point mass (that is the whole point of this
+% model - vd_selftest enforces ay_lim < mu_y), so 1.5*mu_y*g is comfortably
+% above the true root across the LLTD/CoP sweeps in run_balance_targets,
+% without re-opening a ~4.6g bracket whose early trial points push tire
+% loads far past any data support. min(45, ...) is a hard fallback only.
+% NITER=30 still resolves ay to ~1e-6 m/s^2 (30 halvings of a ~20 m/s^2
+% bracket) - the old 60 bought precision nobody needed, at the cost of
+% doubling every downstream nested bisection (corner_speed, lap_sim).
+NITER = 30;
+lo = 0;  hi = min(45, 1.5 * p.mu_y * p.g);             % [m/s^2]
+
+% The interior search deliberately walks through unphysical trial ay values
+% (that's inherent to bisection needing a bracket wider than the answer) -
+% those trials can push tire loads past mu_of_load's data-support range and
+% fire its 'beyondDonorCoverage' / 'belowFloor' warnings thousands of times
+% per lap_sim call for no diagnostic value. Silence them for the search only;
+% the final recompute below runs with warnings restored, so a converged
+% answer that is genuinely out of range still warns exactly once.
+w1 = warning('off', 'mu_of_load:beyondDonorCoverage');
+w2 = warning('off', 'mu_of_load:belowFloor');
+restore1 = onCleanup(@() warning(w1.state, w1.identifier));
+restore2 = onCleanup(@() warning(w2.state, w2.identifier));
+
+for it = 1:NITER
     ay = (lo + hi) / 2;
     [cap_f, cap_r] = capacities(p, W_f, W_r, ay);
     if min(cap_f - p.m*ay*dem_frac_f, cap_r - p.m*ay*dem_frac_r) > 0
@@ -33,6 +56,8 @@ for it = 1:60
     end
 end
 ay = lo;
+
+clear restore1 restore2   % re-enable both warnings before the final, real evaluation
 
 [cap_f, cap_r, Fz, lift] = capacities(p, W_f, W_r, ay);
 dem_f = p.m * ay * dem_frac_f;

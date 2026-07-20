@@ -16,6 +16,14 @@ here = fileparts(mfilename('fullpath'));
 [s, kappa, x, y] = load_track(fullfile(here, 'tracks', track_csv));
 [v, t_lap, E] = lap_sim(p, s, kappa, [], true);
 
+% Before/after: same car on the point-mass lateral limit (the old optimistic
+% model) so the fidelity gain from the axle upgrade is quantified, not asserted.
+p_pm = p;  p_pm.grip_model = 'pointmass';
+[~, t_pm] = lap_sim(p_pm, s, kappa, [], true);
+fprintf(['lap_report: %s lap  axle(realistic) %.2f s  vs  point-mass %.2f s' ...
+         '  ->  point mass is %.2f s / %.1f%% optimistic\n'], ...
+        name, t_lap, t_pm, t_lap - t_pm, 100*(t_lap - t_pm)/t_lap);
+
 ds   = diff(s);
 ax_g = [diff(v.^2)./(2*ds); 0] / p.g;
 ay_g = v.^2 .* kappa / p.g;                    % curvature unsigned -> |ay|
@@ -45,11 +53,12 @@ subplot(2,2,4); hold on; grid on;
 theta = linspace(0, pi, 150);
 for vk = [10 20]
     G = gg_envelope(p, vk);
+    aymax = ay_limit(p, vk);            % lateral extent = the limit the sim used
     ex = cos(theta);
     ex(cos(theta)>=0) = G.ax_accel*cos(theta(cos(theta)>=0));
     ex(cos(theta)<0)  = G.ax_brake*cos(theta(cos(theta)<0));
-    plot(ex, G.ay*sin(theta), '-', 'Color', [0.6 0.6 0.6], 'LineWidth', 1.2);
-    text(-2.15, G.ay - 0.09, sprintf('%d m/s', vk), 'FontSize', 8, 'Color', [0.5 0.5 0.5]);
+    plot(ex, aymax*sin(theta), '-', 'Color', [0.6 0.6 0.6], 'LineWidth', 1.2);
+    text(-2.15, aymax - 0.09, sprintf('%d m/s', vk), 'FontSize', 8, 'Color', [0.5 0.5 0.5]);
 end
 scatter(ax_g, ay_g, 8, v, 'filled', 'MarkerFaceAlpha', 0.65);
 xlim([-2.3 1.3]); ylim([0 2.15]);
