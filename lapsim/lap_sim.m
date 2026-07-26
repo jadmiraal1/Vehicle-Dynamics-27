@@ -1,18 +1,7 @@
 function [v, t, E] = lap_sim(p, s, kappa, v0, closed)
-% LAP_SIM  Quasi-steady-state point-mass lap solver.
-%   [v, t, E] = lap_sim(p, s, kappa, v0, closed)
-%   s [m], kappa [1/m] (same length) -> speed trace v [m/s], lap time t [s],
-%   optional E: energy accounting struct (Wh; drive at wheel/accumulator,
-%   braking energy as regen upper bound).
-%   v0 : start speed (m/s), [] to free it.  closed : wrap the lap (default true).
-% Method (corner-speed ceiling, forward/backward passes, friction ellipse
-% with the MEASURED exponent n from the 18in LC0 combined sweeps, not a
-% hard-coded circle): VD_physics_reference.md, section 7.
-% LATERAL LIMIT: both the corner-speed ceiling (vlim) and the ellipse's ay_max
-% come from ay_limit.m (p.grip_model). Default 'axle' = load-sensitive, so
-% cornering respects the grip lost to load transfer; 'pointmass' reproduces the
-% old optimistic constant-mu lap. The LONGITUDINAL edges (ax_accel, ax_brake)
-% are still the point-mass gg_envelope - this upgrade is lateral-only.
+% LAP_SIM  QSS point-mass lap solver: ceiling pass + forward/backward passes,
+% friction ellipse with measured exponents, lateral limit via ay_limit (p.grip_model).
+%   [v, t, E] = lap_sim(p, s, kappa, v0, closed)   Theory: ref doc sec 7.
 
 if nargin < 4, 
     v0 = []; 
@@ -25,7 +14,9 @@ kappa = kappa(:);
 n = numel(s);  
 ds = diff(s);
 
-vlim = arrayfun(@(k) corner_speed(p, k), kappa);   % per-point speed ceiling
+% Build the ay_limit lookup once (local ay_lut below); ceiling + ellipse share it.
+ayf  = ay_lut(p);
+vlim = arrayfun(@(k) corner_speed(p, k, ayf), kappa);   % per-point speed ceiling
 v = vlim;
 if ~isempty(v0), v(1) = v0; end
 
@@ -36,7 +27,7 @@ niter = 3;  if ~closed, niter = 1; end
 for it = 1:niter
     for i = 1:n-1                                   % forward / accelerate
         G     = gg_envelope(p, v(i));               % longitudinal edges (point mass)
-        aymax = ay_limit(p, v(i));                  % LATERAL edge (p.grip_model)
+        aymax = ayf(v(i));                          % lateral edge (p.grip_model), via LUT
         used = min(v(i)^2*kappa(i) / max(aymax*p.g, 1e-6), 1.0);
         frac = (max(0, 1 - used^n_d))^(1/n_d);      % friction ellipse, exponent n_d
         ax  = G.ax_accel * p.g * frac;
@@ -44,7 +35,7 @@ for it = 1:niter
     end
     for i = n:-1:2                                  % backward / brake
         G     = gg_envelope(p, v(i));               % longitudinal edges (point mass)
-        aymax = ay_limit(p, v(i));                  % LATERAL edge (p.grip_model)
+        aymax = ayf(v(i));                          % lateral edge (p.grip_model), via LUT
         used = min(v(i)^2*kappa(i) / max(aymax*p.g, 1e-6), 1.0);
         frac = (max(0, 1 - used^n_b))^(1/n_b);      % friction ellipse, exponent n_b
         ax  = G.ax_brake * p.g * frac;
@@ -61,18 +52,8 @@ if nargout > 2
 end
 end
 
-
 function n = ellipse_exp(p, mode)
 % Combined-grip friction-ellipse exponent: (ax/axmax)^n + (ay/aymax)^n = 1.
-% n is MEASURED from the 18in LC0 held-SA combined sweeps (pacejka_fit ->
-% tire_coeffs.mat) and borrowed to the 16in design tire - the envelope SHAPE is
-% a construction property that transfers, like the mu_x/mu_y anisotropy.
-%   n = 2   -> the classic circle (what this used to hard-code)
-%   n ~ 1.8 -> the measured value: a POINTIER envelope, i.e. LESS simultaneous
-%              grip at combined states, so lap times come out a touch slower.
-% CAVEAT: the measured n is a LOWER BOUND (SA only swept to ~6 deg), so the true
-% envelope is somewhere between it and ~2.0-2.2; this is therefore the
-% conservative edge. Falls back to 2 (circle) if the exponent isn't loaded.
 switch lower(mode)
     case 'brake', f = 'n_env_brake';
     otherwise,    f = 'n_env_drive';
@@ -84,6 +65,17 @@ else
 end
 end
 
+function ayfun = ay_lut(p, npts)
+% Precomputed ay_limit(p,v) lookup handle; build once per lap, interpolate.
+% ay(v) is smooth/monotone (downforce only), so 120 pts is exact to ~1e-4 g.
+if nargin < 2 || isempty(npts), npts = 120; end
+vmax = p.v_max;
+vg = linspace(0, vmax, npts);
+ag = arrayfun(@(v) ay_limit(p, v), vg);     % the only axle_grip calls per lap
+% pchip = shape-preserving (monotone data stays monotone, no overshoot).
+F = griddedInterpolant(vg, ag, 'pchip');
+ayfun = @(v) F(min(max(v, 0), vmax));
+end
 
 function E = lap_energy(p, v, s)
 % Longitudinal energy along the speed trace. Wheel thrust from Newton's

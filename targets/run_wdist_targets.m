@@ -1,31 +1,6 @@
 function out = run_wdist_targets()
-% RUN_WDIST_TARGETS  Static front/rear weight-distribution target (#2, T-WDIST).
-% Sweeps mass_dist_f across the mid-tier models and reports the tradeoff:
-%   lateral grip (axle_grip) | launch traction (gg_envelope) | braking
-%   (per-axle, load-sensitive) | LLTD authority to balance the limit.
-% Theory: VD_physics_reference.md, section 12.
-%
-% THE KEY FINDING, READ THIS BEFORE QUOTING A NUMBER
-% --------------------------------------------------
-% Every STEADY-STATE metric here favours going rearward, or is flat:
-%   - lateral grip is nearly flat vs weight split (~1% over 38-52% front),
-%   - braking mildly IMPROVES rearward (braking shifts load forward, so a
-%     rear-static car is more balanced under the brakes),
-%   - launch traction strongly favours rearward (RWD: rear axle carries the
-%     drive load; ~+24% traction at 38% vs 50% front),
-%   - LLTD can trim the limit balance to front-limited across the whole range.
-% So this model, left alone, drives the answer to the rearmost point it is
-% given. That is NOT a recommendation to run 38% front. The thing that
-% actually limits rearward bias is TRANSIENT yaw stability - turn-in,
-% trail-braking rotation, snap-oversteer margin - and NO model in this chain
-% sees it yet (it needs the transient sim, roadmap #5). A steady-state car
-% can be perfectly balanced at the limit and still be a handful in transients.
-%
-% Therefore the target is issued as: "rearmost that transient stability
-% allows", with a PROVISIONAL front floor from FSAE convention until the
-% transient model or track data sets the real limit. Weight distribution is a
-% packaging decision made once; set it for traction/packaging and leave
-% handling balance to LLTD - do not chase steady-state balance with it.
+% RUN_WDIST_TARGETS  Weight-distribution sweep (T-WDIST). Grip ~flat vs split;
+% steady-state favours rear; rearward LIMIT needs the transient model (not this).
 
 p = vehicle_params();
 
@@ -67,7 +42,7 @@ fprintf('\nWEIGHT-DISTRIBUTION TARGET  (#2, T-WDIST; mid-tier, steady-state)\n')
 fprintf('%6s %8s %8s %8s %9s  %s\n','front%','skid_ay','accel_g','brake_g','LLTD_neu','stability');
 for i = 1:n
     tag = '';
-    if ~trimmable(i),                tag = 'LLTD OUT OF RANGE';
+    if ~trimmable(i),                tag = 'LLTD out of range';
     elseif CHI_SWEEP(i) < CHI_FLOOR_CONV, tag = 'below transient floor (unproven)';
     end
     mark = ''; if i==icur, mark = '  <- current'; end
@@ -76,15 +51,15 @@ for i = 1:n
 end
 
 fprintf('\nT-WDIST target : %.0f-%.0f%% front (PROVISIONAL)\n', 100*rec_lo, 100*(rec_lo+0.03));
-fprintf('  Basis: grip is FLAT vs split (%.1f%% over the sweep) so weight\n', ...
+fprintf('  Basis: grip is flat vs split (%.1f%% over the sweep) so weight\n', ...
         100*(max(ay)/min(ay)-1));
-fprintf('  distribution is a TRACTION vs TRANSIENT-STABILITY call, not a grip\n');
+fprintf('  distribution is a traction vs transient-stability call, not a grip\n');
 fprintf('  one. Steady-state models favour rearward monotonically (accel +%.0f%%\n', ...
         100*(accel(1)/accel(end)-1));
-fprintf('  at %.0f%% vs %.0f%% front); the rearward LIMIT is transient yaw\n', ...
+fprintf('  at %.0f%% vs %.0f%% front); the rearward limit is transient yaw\n', ...
         100*CHI_SWEEP(1), 100*CHI_SWEEP(end));
-fprintf('  stability, which is NOT modelled here (roadmap #5 / track data).\n');
-fprintf('  Current %.0f%% front is accel-strong but BELOW the provisional\n', ...
+fprintf('  stability, which is not modelled here (roadmap #5 / track data).\n');
+fprintf('  Current %.0f%% front is accel-strong but below the provisional\n', ...
         100*p.mass_dist_f);
 fprintf('  transient floor (%.0f%%): validate turn-in / trail-brake stability\n', ...
         100*CHI_FLOOR_CONV);
@@ -104,7 +79,6 @@ catch e
 end
 end
 
-
 function Ln = balance_lltd(p, v, rng)
 % LLTD (front roll-stiffness fraction) that equalizes front/rear limit margin.
 % More front LLTD -> pushes the limit toward the front axle. Bisect on it.
@@ -116,7 +90,6 @@ for it = 1:40
 end
 Ln = (lo + hi)/2;
 end
-
 
 function D = brake_axle_limit(p)
 % Per-axle, load-sensitive straight-line braking limit [g], ideal bias.
@@ -133,7 +106,6 @@ for it = 1:60
 end
 D = lo;
 end
-
 
 function make_plot(p, chi, ay, accel, brake, lltd, floor_conv, rng)
 f = figure('Visible','off','Position',[60 60 1180 400],'Color','w');
@@ -159,7 +131,7 @@ xline(100*floor_conv, ':', 'transient floor', 'HandleVisibility','off');
 xlabel('front mass %'); ylabel('LLTD to balance the limit');
 ylim([0.3 0.8]); grid on; title('LLTD authority (in band = trimmable)');
 
-outdir = fullfile(fileparts(mfilename('fullpath')), 'plots');
+outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 saveas(f, fullfile(outdir, 'wdist_targets.png'));
 close(f);

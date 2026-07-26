@@ -1,13 +1,8 @@
 function out = params_report()
-% PARAMS_REPORT  Export vehicle_params to a human-readable spreadsheet.
-% ONE-WAY: generated FROM the code for people who don't open MATLAB.
-% Nobody edits the xlsx; vehicle_params.m stays canonical (provenance,
-% derived logic, git diffs, selftest guards all live there).
-% Output: organization/vehicle_params_report.xlsx
-% Regenerate after any parameter change.
+% PARAMS_REPORT  One-page summary of vehicle_params -> console/plots.
 
 p    = vehicle_params();
-here = fileparts(mfilename('fullpath'));
+here = vd_root();
 
 % Parse the SOURCE for tier banners and provenance comments; values come
 % from the evaluated struct so derived numbers are real numbers.
@@ -21,7 +16,7 @@ i = 1;
 last_used = 0;   % last line already consumed by a previous param's comments
 while i <= numel(lines)
     ln = lines{i};
-    if contains(ln, 'LOADED (generated artifact)'), tier = 'loaded';  end
+    if contains(ln, 'Loaded (generated artifact)'), tier = 'loaded';  end
     if contains(ln, '= DERIVED =')
         tier = 'derived';
     end
@@ -88,7 +83,6 @@ out = struct('n_params', size(rows, 1) - 1, 'n_provisional', n_prov, ...
              'file', fout);
 end
 
-
 function s = fmt(v)
 if ischar(v) || isstring(v)
     s = char(v);
@@ -104,7 +98,6 @@ else
     s = class(v);
 end
 end
-
 
 function s = prov_flag(note)
 if contains(upper(note), 'PROVISIONAL'), s = 'PROVISIONAL'; else, s = ''; end

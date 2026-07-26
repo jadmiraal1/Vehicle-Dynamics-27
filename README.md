@@ -1,11 +1,26 @@
-# TR26 Vehicle Dynamics Toolchain
+# TR27 Vehicle Dynamics Toolchain
 
 Concept-tier vehicle dynamics models for the Triton Racing FSAE EV: tire
 characterization from TTC data through load transfer, the g-g-V envelope, a
 quasi-steady-state lap simulator, and a bicycle handling model. Every script
 produces *targets* — numbers handed to other subteams — tracked in
-`VD_target_catalog.xlsx`. The end goal this chain builds toward is a transient
-lap simulation in Simulink.
+`TR27 Vehicle Dynamics Target Tracker.xlsx`. The end goal this chain builds
+toward is a transient lap simulation in Simulink.
+
+## Layout & first run (Jul 2026 reorg)
+
+    vehicle_params.m    the one file you edit (car inputs; grip is loaded, not typed)
+    tire_coeffs.mat     generated tire artifact (interface between tire/ and everything)
+    vd_setup.m          run once per MATLAB session: adds the folders below to the path
+    tire/               tire fitting + artifact build (pacejka_fit, build_tire_coeffs, ...)
+    models/             physics evaluators (axle_grip, gg_envelope, mu_of_load, ...)
+    lapsim/             the lap solver (lap_sim, corner_speed, load_track, reports)
+    targets/            runnable target scripts (run_*, aligning_moment)
+    tests/              vd_selftest (run after any edit)
+    TTC_Data/ tracks/ plots/ organization/ references/   data and outputs (unchanged)
+
+Typical session: `vd_setup` → edit / run `targets/run_*` → `vd_selftest`.
+After changing tire-fit code or TTC data: `build_tire_coeffs` → `vd_selftest`.
 
 Physics derivations live in `VD_physics_reference.md` (sections referenced
 below as §N). Scripts carry label comments only; the reasoning lives there.

@@ -1,11 +1,8 @@
 function out = run_lap_targets()
-% RUN_LAP_TARGETS  Whole-lap targets from the QSS point-mass lap sim:
-% T-ACC2 75 m | T-SKID2 skidpad | T-LAP lap times | T-VMAX | T-MS3 mass.
-% Tracks: real CSVs from `python tr26_sim.py tracks`, else the synthetic
-% representative loop. Details: VD_physics_reference.md, section 7.
+% RUN_LAP_TARGETS  Lap-derived targets: lap times, mass sensitivity, accel.
 
 p = vehicle_params();
-here = fileparts(mfilename('fullpath'));
+here = vd_root();
 
 fprintf('\nCONCEPT-TIER LAP-SIM TARGETS  (%s, %s, v_max %.1f m/s = %.0f mph)\n', ...
         p.tire_id, p.drive, p.v_max, p.v_max*2.237);
@@ -45,7 +42,7 @@ if ~ran_any
         [s, k, xt, yt] = load_track(f);
         [vl, tl, E] = lap_sim(p, s, k, [], true);
         save_lap_map(here, 'representative', xt, yt, vl, tl);
-        fprintf('[T-LAP  ] REPRESENTATIVE lap : %.2f s  (%.0f m loop) — digitize real maps to replace\n', tl, s(end));
+        fprintf('[T-LAP  ] representative lap : %.2f s  (%.0f m loop) — digitize real maps to replace\n', tl, s(end));
         out.laps.representative = tl;  lap_s = s;  lap_k = k;
     else
         fprintf('[T-LAP  ] no track CSV found — run the Python digitizer first.\n');
@@ -69,16 +66,15 @@ if ~isempty(lap_s)
     p2.k_rot = 1 + (4*p2.I_wheel + p2.I_rotor*p2.gear_ratio^2)/(p2.m*p2.Re^2);
     [~, t1] = lap_sim(p2, lap_s, lap_k, [], true);
     dtdm = (t1 - t0)/10;
-    fprintf('[T-MS3  ] MASS SENSITIVITY : %.1f ms/kg over the lap (%.4f s/kg)\n', dtdm*1000, dtdm);
+    fprintf('[T-MS3  ] mass sensitivity : %.1f ms/kg over the lap (%.4f s/kg)\n', dtdm*1000, dtdm);
     out.dtdm_lap = dtdm;
 end
 
 out.t_acc = t_acc;  out.v_skid_g = vsk^2/(R*p.g);  out.t_skid = 2*pi*R/vsk;  out.v_max = p.v_max;
-fprintf('CAVEATS: point mass (no balance/per-wheel transfer), centreline racing\n');
+fprintf('Caveats: point mass (no balance/per-wheel transfer), centreline racing\n');
 fprintf('line, mu derated %.2f, k_trac/eta provisional. Calibrate vs skidpad in Fall.\n', p.mu_derate);
 fprintf('Animate any lap with lap_replay(''track_<name>.csv'').\n\n');
 end
-
 
 function save_lap_map(here, name, x, y, v, t_lap)
 % Speed-colored track map: visual check that the right course loaded.

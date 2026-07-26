@@ -1,8 +1,5 @@
 function out = run_gg_targets()
-% RUN_GG_TARGETS  Performance targets from the point-mass g-g-V envelope:
-% T-SKID skidpad | T-ACC 75 m | T-GG envelope | T-PWR power | T-MS2 mass.
-% Derivations and caveats: VD_physics_reference.md, section 6.
-% Output field names are used by vd_selftest.m — keep.
+% RUN_GG_TARGETS  Skidpad / accel / braking targets from the g-g-V envelope.
 
 p = vehicle_params();
 
@@ -50,7 +47,7 @@ dt_per_kg = (t_acc_heavier - t_acc) / 10;
 
 fprintf('T-MS2  accel mass  : %.1f ms/kg  (+10 kg finite diff; accel event only)\n', ...
         dt_per_kg*1000);
-fprintf('CAVEAT: point mass, no combined-slip tire; k_trac/eta provisional.\n');
+fprintf('Caveat: point mass, no combined-slip tire; k_trac/eta provisional.\n');
 
 % Pack for programmatic use / vd_selftest
 out.ay_skid    = ay_skid;
@@ -72,7 +69,6 @@ catch e
 end
 end
 
-
 function [t, v] = accel_event(p, dist)
 % Standing-start time by forward integration in fixed velocity steps.
 v = 0; x = 0; t = 0;
@@ -88,7 +84,6 @@ while x < dist
 end
 end
 
-
 function vc = crossover_speed(p)
 % Lowest speed where the motor enters constant power (base speed).
 v_sweep = linspace(1, 45, 450);
@@ -96,7 +91,6 @@ G   = gg_envelope(p, v_sweep);
 idx = find(G.power_limited, 1);
 if isempty(idx), vc = v_sweep(end); else, vc = v_sweep(idx); end
 end
-
 
 function plot_gg(p)
 % Left: capability edges vs speed. Right: g-g ellipses at a few speeds.
@@ -127,7 +121,7 @@ xlabel('longitudinal a_x [g]  (+accel / -brake)'); ylabel('lateral a_y [g]');
 axis equal; grid on; legend('Location', 'eastoutside');
 title('g-g ellipses vs speed');
 
-outdir = fullfile(fileparts(mfilename('fullpath')), 'plots');
+outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 saveas(f, fullfile(outdir, 'gg_envelope.png'));
 close(f);

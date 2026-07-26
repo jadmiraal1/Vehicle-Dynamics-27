@@ -1,12 +1,7 @@
 function p = vehicle_params(mode)
-% VEHICLE_PARAMS  Single source of truth for the car.
-% Units: SI throughout (kg, m, N, s, rad) unless noted.
-%
-%   p = vehicle_params()             % normal: grip loaded from tire_coeffs.mat
-%   p = vehicle_params('bootstrap')  % car only, grip = NaN. For the tire fits.
-%
-% Three tiers: INPUTS (measured/decided), LOADED (from tire_coeffs.mat, never
-% hand-typed), DERIVED (computed below, never hand-typed).
+% VEHICLE_PARAMS  Single source of truth for the car. SI units unless noted.
+%   p = vehicle_params()             grip loaded from tire_coeffs.mat
+%   p = vehicle_params('bootstrap')  car only, grip NaN (for the tire fits)
 
 if nargin < 1, mode = 'full'; end
 bootstrap = strcmpi(mode, 'bootstrap');
@@ -14,12 +9,12 @@ bootstrap = strcmpi(mode, 'bootstrap');
 % ======================= INPUTS =========================================
 
 % --- Mass ---
-p.m_car    = 247.66;  % car, DRY, no driver [kg] = 546 lb (TR25 measured)
-p.m_driver     = 86.18;  % DESIGN driver [kg] = 180 lb body + 10 lb gear (heaviest at competition)
-p.m_driver_min = 61.23;  % LIGHTEST driver [kg] = 125 lb + gear (binding case for rollover)
-p.m_driver_max = 95.25;  % heaviest PLAUSIBLE driver [kg] = 200 lb + gear (binding case for peak tire load)
-p.m        = p.m_car + p.m_driver;   % DERIVED - never hand-type this
-p.mass_dist_f = 0.40;      % static front mass fraction [-]
+p.m_car    = 233.8;  % car, DRY, no driver [kg] = 515 lb (TR27 target)
+p.m_driver     = 86.18;  % design driver [kg] = 180 lb body + 10 lb gear (heaviest at competition)
+p.m_driver_min = 61.23;  % lightest driver [kg] = 125 lb + gear (binding case for rollover)
+p.m_driver_max = 95.25;  % heaviest plausible driver [kg] = 200 lb + gear (binding case for peak tire load)
+p.m        = p.m_car + p.m_driver;   % derived - don't hand-type
+p.mass_dist_f = 0.45;      % static front mass fraction [-]
 p.h_cg        = 0.2794;    % CG height above ground [m]
 
 % --- Geometry ---
@@ -33,14 +28,6 @@ p.tire_data_prefix = 'LC0_16x75';   % TTC_Data filename prefix of the design tir
 p.mu_derate = 0.67;   % lambda_muY, belt->track grip scaling [-] PROVISIONAL, fit at skidpad
 p.lambda_Ca = 0.90;   % lambda_KyA, belt->track slip-stiffness scaling [-] PROVISIONAL
                       % Literature-consistent: cornering stiffness measures ~4-8%
-                      % higher on abrasive belt than asphalt (road-roughness study,
-                      % Veh. Sys. Dyn. 2025) -> ~0.92-0.96. 0.90 is a slightly
-                      % conservative choice; validate with a constant-radius /
-                      % steer-torque test. (Contrast the grip derate 0.67: stiffness
-                      % is structural, so far less surface-sensitive than peak mu.)
-                      % Pneumatic trail = aligning/cornering stiffness, both
-                      % structural -> its ratio is ~surface-invariant, so trail's
-                      % belt->track factor is ~1.0 (used in aligning_moment.m).
 p.Re        = 0.20;   % loaded tire radius [m]
 
 % --- Powertrain ---
@@ -78,12 +65,15 @@ p.CdA = 0.9527;    % drag coeff x area [m^2]
 p.LLTD          = 0.60;  % lateral load transfer distribution, front frac [-] PROVISIONAL
 p.aero_df_front = 0.40;  % front share of downforce (CoP) [-] PROVISIONAL
 
+% --- Scenario / strategy assumptions (not measured car properties) ---
+p.scenario.endurance_m    = 22000;  % official FSAE endurance distance [m]
+p.scenario.benchmark_laps = 22;     % lap basis of the real-2026 energy benchmarks [-]
+p.scenario.regen_capture  = 0.50;   % fraction of braking ENERGY reaching the rear motor [-] PROVISIONAL
+p.scenario.regen_rt       = 0.65;   % round-trip efficiency of recovered energy [-] PROVISIONAL
+p.scenario.pack_usable_f  = 0.90;   % usable fraction of nominal pack energy (BMS SoC window) [-] PROVISIONAL
+p.scenario.margin         = 0.90;   % design margin on usable energy (heat/driver/cones) [-] CHOICE
+
 % --- Model selection ---
-% Lateral grip model for corner_speed / lap_sim, via ay_limit.m:
-%   'axle'      load-sensitive per-axle limit (realistic; accounts for the grip
-%               LOST to lateral load transfer). DEFAULT.
-%   'pointmass' constant-mu g-g envelope (optimistic; over-predicts cornering).
-%               For before/after comparison only.
 p.grip_model = 'axle';
 
 % ======================= LOADED (generated artifact) =====================
@@ -112,17 +102,17 @@ else
     art  = fullfile(here, 'tire_coeffs.mat');
     if ~exist(art, 'file')
         error('vehicle_params:noTireCoeffs', ...
-              'tire_coeffs.mat not found. Grip is generated, not typed. Run: build_tire_coeffs');
+              'tire_coeffs.mat not found. Run: build_tire_coeffs');
     end
     T = load(art);
     p.mu_y_raw      = T.mu_y_raw;       % curve-based peak lateral mu @ design load
     p.mu_anisotropy = T.mu_anisotropy;  % mu_x/mu_y, computed cross-tire transfer
     p.Ca_coef       = T.Ca_coef;        % Ca(Fz) quadratic [lbf/deg]
-    p.mu_coef       = T.mu_coef;        % mu(Fz) linear, VALID ONLY to Fz_fit_max
+    p.mu_coef       = T.mu_coef;        % mu(Fz) linear, valid only to Fz_fit_max
     p.Fz_fit_max    = T.Fz_fit_max;     % design tire's data edge [lbf]
     p.mu_hiload_slope = T.mu_hiload_slope; % donor-informed slope above the edge
     p.hiload_cov_lbf = T.hiload_cov_lbf;   % donor coverage limit [lbf] - past this, mu_of_load's 'central' slope is unvalidated even by donors
-    p.Fz_outer_limit_lbf = T.Fz_outer_limit_lbf; % outer-tire cornering load [lbf] - computed ONCE in build_tire_coeffs.m, do not recompute elsewhere
+    p.Fz_outer_limit_lbf = T.Fz_outer_limit_lbf; % outer-tire cornering load [lbf] - computed once in build_tire_coeffs.m
     p.mu_outer_central   = T.mu_outer_central;   % mu at Fz_outer_limit_lbf, donor-informed
     p.mu_outer_low       = T.mu_outer_low;       % mu at Fz_outer_limit_lbf, pessimistic blind-linear
     p.shape6        = T.shape6;         % MF shape fraction at 6deg, load-matched to Fz_lat6
@@ -130,8 +120,8 @@ else
     p.mu_y_at6      = T.mu_y_at6;       % 18in LC0 measured mu_y at 6deg (raw, not peak)
     p.Fz_lat6       = T.Fz_lat6;        % load the 18in lateral data was actually taken at [lbf]
     p.mu_x_18       = T.mu_x_18;        % 18in LC0 mean drive/brake mu_x
-    p.n_env_drive   = T.n_env_drive;    % friction-ellipse exponent, DRIVE (measured 18in) - lap_sim ellipse_exp reads this; absence silently made it a circle
-    p.n_env_brake   = T.n_env_brake;    % friction-ellipse exponent, BRAKE (measured 18in)
+    p.n_env_drive   = T.n_env_drive;    % friction-ellipse exponent, drive (measured 18in)
+    p.n_env_brake   = T.n_env_brake;    % friction-ellipse exponent, brake (measured 18in)
     p.tire_basis    = T.basis;          % 'pacejka-curve'
     p.tire_src_hash = T.src_hash;       % what vd_selftest checks for staleness
 end
@@ -142,10 +132,10 @@ if ~bootstrap
     p.tire_hiload = 'central';
 end
 
-% ======================= DERIVED ========================================
+% ======================= derived ========================================
 p.mu_x_raw = p.mu_y_raw * p.mu_anisotropy;  % follows the design tire automatically
-p.mu_y     = p.mu_y_raw * p.mu_derate;      % design peak lateral mu (derated) [-] STATIC, @ design load only - for load-dependent grip use mu_of_load(p, Fz)
-p.mu_x     = p.mu_x_raw * p.mu_derate;      % design peak longitudinal mu (derated) [-] STATIC, @ design load only - for load-dependent grip use mu_of_load(p, Fz)
+p.mu_y     = p.mu_y_raw * p.mu_derate;      % design peak lateral mu (derated) [-] static, design load only; mu_of_load(p,Fz) for load-dependent grip
+p.mu_x     = p.mu_x_raw * p.mu_derate;      % design peak longitudinal mu (derated) [-] static, design load only; mu_of_load(p,Fz) for load-dependent grip
 
 p.a = p.L * (1 - p.mass_dist_f);            % CG to front axle [m]
 p.b = p.L * p.mass_dist_f;                  % CG to rear axle [m]

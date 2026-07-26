@@ -1,7 +1,6 @@
 function GG = gg_envelope(p, v)
-% GG_ENVELOPE  Point-mass g-g-V capability at speed(s) v [m/s]; outputs in [g].
-% Equations and derivations: VD_physics_reference.md, section 5.
-% Output field names are used by vd_selftest.m / downstream scripts — keep.
+% GG_ENVELOPE  Point-mass g-g-V capability at speed v [m/s]; outputs in [g].
+% Field names used by vd_selftest and downstream - keep. Theory: ref doc sec 5.
 
 v      = max(v, 0);
 N      = p.m*p.g + 0.5*p.rho*p.ClA .* v.^2;    % vertical load: weight + downforce [N]

@@ -1,17 +1,6 @@
 function R = ttc_fit()
-% TTC_FIT  Peak tire grip per candidate tire from FSAE TTC data (R8/R9;
-% the 18in LC0 drive/brake donor is R6 - see tireid/source fields).
-% Method, units, and sign conventions: VD_physics_reference.md, section 4.
-%
-% ROLE CHANGED (Jul 2026): this is now a TIRE-SCREENING tool, not a source of
-% design values. It reads the 99th-percentile UPPER ENVELOPE of a noisy point
-% cloud, which ran ~10% high in mu_y and ~16% high in mu_x against the fitted
-% median curve. Design grip now comes from pacejka_fit via build_tire_coeffs.
-% Keep using this for what percentiles are good at: comparing tires on equal
-% terms, and locating the camber / pressure windows.
-%
-% vd_selftest still anchors on this function's LC0 output (2.602) as a check
-% that the TTC data path itself has not moved.
+% TTC_FIT  Percentile-based TTC grip screening across candidate tires.
+% Screening only - design grip comes from build_tire_coeffs (curve basis).
 
 p = vehicle_params('bootstrap');   % car mass only; must not require the
                                    % artifact that this fit helps produce
@@ -26,7 +15,7 @@ LOAD_BAND     = 0.12;               % +/-12% band around design load
 camber_sweep_deg   = [0 2 4];
 pressure_sweep_psi = [8 10 12 14];
 
-here     = fileparts(mfilename('fullpath'));
+here     = vd_root();
 data_dir = fullfile(here, 'TTC_Data');
 
 fprintf('\nTTC FIT  (scaling factor %.2f, design corner load %.0f N = %.0f lbf)\n', ...
@@ -78,7 +67,7 @@ R.mu_x   = struct('raw', mu_x_raw, 'derated', mu_x_raw * R.derate);
 
 fprintf('\nmu_x (LC0_18x60 drive/brake): raw %.3f -> derated %.3f  (cross-tire proxy)\n', ...
         mu_x_raw, mu_x_raw * R.derate);
-fprintf('SCREENING ONLY. Design grip comes from build_tire_coeffs, not from here.\n');
+fprintf('Screening only. Design grip comes from build_tire_coeffs, not from here.\n');
 
 try
     make_plot(R, tire_names, camber_sweep_deg, pressure_sweep_psi);
@@ -87,7 +76,6 @@ catch e
     fprintf('[plot skipped: %s]\n', e.message);
 end
 end
-
 
 function D = load_tire_data(data_dir, pattern)
 % Concatenate channels from all non-raw files matching pattern; missing -> NaN.
@@ -110,7 +98,6 @@ for c = 1:numel(channels)
 end
 end
 
-
 function v = get_channel(S, name, n)
 if isfield(S, name) && numel(S.(name)) == n
     v = S.(name)(:);
@@ -118,7 +105,6 @@ else
     v = nan(n, 1);
 end
 end
-
 
 function mu = peak_friction(F, FZ, mask)
 % Noise-robust peak |F/FZ|: 99th percentile; NaN if < 60 valid samples.
@@ -135,7 +121,6 @@ end
 mu = linear_percentile(abs(f ./ fz), 99);
 end
 
-
 function v = linear_percentile(x, q)
 % Linear-interpolation percentile (numpy default); no toolbox needed.
 x = sort(x(~isnan(x)));
@@ -147,7 +132,6 @@ lo   = floor(rank);
 frac = rank - lo;
 v    = x(lo+1) + frac * (x(min(lo+2, n)) - x(lo+1));
 end
-
 
 function make_plot(R, tire_names, camber_sweep_deg, pressure_sweep_psi)
 colors = {[0.09 0.71 0.79], [0.88 0.57 0.10], [0.12 0.62 0.45], [0.75 0.23 0.17]};
@@ -179,7 +163,7 @@ for k = 1:numel(tire_names)
 end
 set(gca, 'XTickLabel', tire_names); ylabel('design \mu_y (scaled)');
 title('Design grip comparison (SCREENING ONLY - not design values)');
-outdir = fullfile(fileparts(mfilename('fullpath')), 'plots');
+outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 saveas(f, fullfile(outdir, 'ttc_fit.png'));
 close(f);

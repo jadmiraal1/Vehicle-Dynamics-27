@@ -1,28 +1,17 @@
 function out = run_handling_targets()
-% RUN_HANDLING_TARGETS  Handling targets from the bicycle model.
-% T-USG understeer gradient | T-VCR/VCH stability speed | T-YRG yaw-rate
-% gain | T-YAW transient yaw response. Model: bicycle_model.m; theory:
-% VD_physics_reference.md, sec 10.
+% RUN_HANDLING_TARGETS  Bicycle-model targets: K, stability speed, yaw gain/response.
 
 p = vehicle_params();
 
-% Cornering stiffness comes from the ARTIFACT (p.Ca_coef, loaded from
-% tire_coeffs.mat), NOT from a live pacejka_fit() call.
-%
-% This used to be `evalc('T = pacejka_fit();')` - a runtime re-fit. That
-% quietly defeated the whole point of the generated-artifact pattern: edit
-% pacejka_fit.m and the understeer gradient would change on the next run, with
-% no rebuild, no re-issue, and no staleness warning. Grip was decoupled from
-% the car but STIFFNESS was not. Now both come from the same promoted artifact,
-% so the staleness gate covers K, yaw gain and yaw response too.
+% Cornering stiffness comes from the artifact (p.Ca_coef, loaded from
 N_PER_LBF = 4.44822;
 LBF_DEG_TO_N_RAD = N_PER_LBF * 180/pi;
 
-% Axle stiffness: 2 x per-tire Ca at static per-tire load, belt->track scaled
-Fz_tire_f = p.Wf_static / 2 / N_PER_LBF;
-Fz_tire_r = p.Wr_static / 2 / N_PER_LBF;
-Ca_axle_f = 2 * polyval(p.Ca_coef, Fz_tire_f) * LBF_DEG_TO_N_RAD * p.lambda_Ca;
-Ca_axle_r = 2 * polyval(p.Ca_coef, Fz_tire_r) * LBF_DEG_TO_N_RAD * p.lambda_Ca;
+% Axle stiffness at static loads, via understeer_at's shared evaluator (ax=0
+% gives exactly the static axle loads), so this and the stability study agree.
+[~, i0] = understeer_at(p, 0);
+Ca_axle_f = i0.Ca_f;
+Ca_axle_r = i0.Ca_r;
 
 B = bicycle_model(p, Ca_axle_f, Ca_axle_r, linspace(1, p.v_max, 100));
 
@@ -50,7 +39,7 @@ fprintf('T-YAW  yaw response        : tau %.0f ms @ 15 m/s -> %.0f ms @ v_max, z
         1000*B.tau_slow(i15), 1000*B.tau_slow(end), min(B.zeta_eq), max(B.zeta_eq));
 fprintf('       (zeta >= 1: overdamped, no yaw oscillation; Izz = %.0f kg*m^2, DI %.2f prov.)\n', ...
         p.Izz, p.DI);
-fprintf('CAVEAT: static axle loads, linear tires (valid to ~0.4 g), no load\n');
+fprintf('Caveat: static axle loads, linear tires (valid to ~0.4 g), no load\n');
 fprintf('        transfer or roll stiffness (mid-tier moves K). lambda_Ca=%.2f prov.\n', ...
         p.lambda_Ca);
 
@@ -69,7 +58,6 @@ catch e
     fprintf('[plot skipped: %s]\n', e.message);
 end
 end
-
 
 function make_plot(p, B)
 % Left: steady-state gain vs neutral. Right: transient yaw response.
@@ -94,16 +82,15 @@ ylabel('equivalent damping ratio \zeta [-]');
 xlabel('speed [m/s]'); grid on;
 title('Transient yaw response vs speed');
 
-outdir = fullfile(fileparts(mfilename('fullpath')), 'plots');
+outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 saveas(f, fullfile(outdir, 'handling_response.png'));
 close(f);
 end
 
-
 function s = balance_word(K)
 if     K >  0.1, s = 'understeer';
-elseif K < -0.1, s = 'OVERSTEER - check margin';
+elseif K < -0.1, s = 'oversteer - check margin';
 else,            s = 'near neutral';
 end
 end

@@ -1,18 +1,11 @@
 function lap_replay(track_csv, speedup)
-% LAP_REPLAY  Animate the QSS lap: moving point mass + live g-g usage.
-%   lap_replay                            representative track, real time
-%   lap_replay('track_autocross.csv')     named track
-%   lap_replay('track_autocross.csv', 3)  3x fast-forward
-% Left: speed-colored track with the car as a moving dot. Right: the g-g
-% envelope at the car's current speed with the instantaneous (ax, ay) point
-% - it should ride the boundary in corners and braking zones (limit driving)
-% and sit inside it only on power-limited straights.
+% LAP_REPLAY  Animated speed-trace replay of the lap sim.
 
 if nargin < 1 || isempty(track_csv), track_csv = 'track_representative.csv'; end
 if nargin < 2, speedup = 1; end
 
 p    = vehicle_params();
-here = fileparts(mfilename('fullpath'));
+here = vd_root();
 [s, kappa, x, y] = load_track(fullfile(here, 'tracks', track_csv));
 [v, t_lap] = lap_sim(p, s, kappa, [], true);
 

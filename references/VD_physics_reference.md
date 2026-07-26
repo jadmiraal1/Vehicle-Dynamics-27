@@ -258,9 +258,25 @@ line, each with an arc length `s` and curvature `κ = 1/R` (from `load_track.m`)
 at every point: what is the fastest speed consistent with the g-g-V envelope?
 
 **Corner-speed ceiling — `corner_speed.m`.** Steady cornering at curvature `κ` demands
-`a_y = v²κ`; the envelope supplies `a_y,max(v)·g`. Because downforce makes capability rise
-with speed, the equation `v²κ = a_y,max(v)·g` has a unique crossing, found by bisection.
+`a_y = v²κ`; the lateral limit supplies `a_y,max(v)·g`. Because downforce makes capability
+rise with speed, the equation `v²κ = a_y,max(v)·g` has a unique crossing, found by bisection.
 Straights (`κ ≈ 0`) return the rev-limited top speed.
+
+**Lateral limit source — `ay_limit.m` (the model switch).** As of the Jul 2026 upgrade the
+lateral limit `a_y,max(v)` no longer comes straight from `gg_envelope`. Both `corner_speed`
+and `lap_sim` call `ay_limit(p, v)`, a single evaluator selected by `p.grip_model`:
+
+- `'axle'` (default) → `axle_grip(p,v).ay_lim_g`, the **load-sensitive** per-axle limit
+  (§11): transferring load onto the outer tire *loses* grip because μ falls with load, so
+  `a_y,max ≈ 0.88–0.90·μ_y·g`, not `μ_y·g`. This is the realistic mid-tier ceiling.
+- `'pointmass'` → `gg_envelope(p,v).ay`, the old constant-μ envelope (`≈ μ_y·g`), kept only
+  to reproduce the earlier optimistic lap for a before/after comparison.
+
+This upgrade is **lateral-only**: the longitudinal edges (`a_x,accel`, `a_x,brake`) still come
+from the point-mass `gg_envelope`, and the friction ellipse then couples them against the new
+`a_y,max`. Effect (validated in Python and MATLAB): the endurance lap goes from 65.7 s
+(point mass) to 68.7 s (axle) — the point mass was **~4.4 % optimistic** — with the whole gap
+coming from corner-entry/apex/exit; straights are unchanged. `lap_report` prints both times.
 
 **Speed trace — `lap_sim.m`.** Three steps:
 
@@ -600,3 +616,49 @@ The target is therefore issued as "rearmost that transient stability allows", wi
 front floor from FSAE convention (~44%) until the transient model (roadmap #5) or track data
 sets the real limit. The current 40% front is accel-optimal but below that floor and flagged for
 validation.
+
+---
+
+## 13. Design notes relocated from code headers (Jul 2026 cleanup)
+
+Code headers were cut to 1-3 lines; the mechanism notes they carried live here.
+
+**mu_of_load piecewise law.** Below the design tire's data edge (`Fz_fit_max`), mu(Fz) is the
+measured linear fit. Above it, a donor-informed slope extracted from the pooled 18in tires'
+normalized load-sensitivity shape (cross-tire agreement ~1%, which justifies the transfer;
+blind linear extrapolation would be far too pessimistic). `p.tire_hiload = 'low'` forces the
+blind-linear extension; the band between the two modes is the honest extrapolation
+uncertainty. Physical floor mu = 0.1 with a warning.
+
+**Friction-ellipse exponents.** Measured from the 18in LC0 held-SA combined sweeps:
+n_drive = 1.78, n_brake = 1.82 (vs the classic circle n = 2). The envelope SHAPE is a
+construction property that transfers cross-tire, like the mu_x/mu_y anisotropy. The measured
+n is a lower bound (SA only swept to ~6 deg), so it is the conservative edge.
+
+**Belt-to-track scalings.** Peak grip is surface-dominated: lambda_muY = 0.67, fit at
+skidpad. Cornering stiffness is structural: lambda_KyA = 0.90 (literature ~0.92-0.96,
+belt reads high). Pneumatic trail is the RATIO of two structural stiffnesses
+(aligning/cornering), so it is ~surface-invariant: lambda_t = 1.0. Never merge these.
+
+**ay_limit / ay_lut.** One lateral-limit source for corner_speed and lap_sim, switched by
+`p.grip_model` ('axle' = load-sensitive default, 'pointmass' = old optimistic comparison).
+Because ay(v) varies only through downforce (~v^2, smooth and monotone), a 120-point lookup
+per lap is exact to ~1e-4 g and avoids the nested-bisection cost (~35k axle_grip calls to
+~120 per lap sim).
+
+**Caster / T-CAS.** Steering torque per tire = Fy(alpha) x (mechanical + pneumatic trail).
+Pneumatic trail collapses toward the limit, so with zero caster the wheel goes light exactly
+at the edge; constant mechanical trail restores limit feel. The 3-6 deg recommendation is a
+cited practice window (kept below peak pneumatic trail so it complements, not overpowers,
+self-centering - no power steering); the steering team finalizes against its effort budget
+once the ratio exists. No invented feel threshold selects the value.
+
+**Understeer gradient under longitudinal transfer.** Ca(Fz) is concave, so the needed-slip
+ratio W/Ca RISES with load: braking loads the front -> understeer; power loads the rear ->
+oversteer (normal RWD, managed by diff/throttle/LLTD, not by static weight split). The
+linear model cannot see trail-brake rotation - that is a friction-circle effect at the limit
+requiring combined-slip per-axle grip. K is ill-conditioned: trust sign and trend.
+
+**Rev limit is voltage-governed.** The Emrax 228's 5500 rpm rating is reached at 470 Vdc;
+at this pack (~299 V nominal) back-EMF limits the motor to ~4500 rpm, giving ~24.7 m/s at
+3.82:1. More top speed requires pack voltage, not a higher software limit.

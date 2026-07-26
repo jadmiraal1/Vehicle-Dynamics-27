@@ -1,13 +1,6 @@
 function pass = vd_selftest()
-% VD_SELFTEST  Regression self-check for the VD concept-tier toolchain.
-% Run after any edit. Prints PASS/FAIL; errors on failure.
-%
-% Add tests/ to the path first, or run from the repo root with `addpath tests`.
-%
-% Three layers:
-%   0. ARTIFACT INTEGRITY - is tire_coeffs.mat stale? is grip hand-typed?
-%   1. FORMULA WIRING     - does each script's output equal its own formula?
-%   2. DATA ANCHORS       - do the tire fits still reproduce known numbers?
+% VD_SELFTEST  Regression self-check: artifact staleness, formula wiring, data anchors.
+% Run after any edit. addpath tests, run from repo root.
 
 fprintf('\n================= VD SELF-TEST =================\n');
 
@@ -27,23 +20,19 @@ T = load(art);
 want = vd_hash(tire_src_files(here));
 if ~isfield(T, 'src_hash'), stored = '(none)'; else, stored = T.src_hash; end
 if ~strcmp(stored, want)
-    fprintf(2, ['\n*** STALE TIRE ARTIFACT ***\n' ...
+    fprintf(2, ['\n*** Stale tire artifact ***\n' ...
         'tire_coeffs.mat was built from different inputs than are on disk.\n' ...
         '  stored: %s\n  actual: %s\n' ...
         'The tire fit code, the promotion math, or the TTC data changed since\n' ...
         'the last build, so the car is running on grip that no longer matches.\n\n' ...
         'Run:  build_tire_coeffs\n' ...
-        'Then RE-ISSUE the grip-derived targets (#8 #12 #13 #48 #49 #61-65)\n' ...
+        'Then re-issue the grip-derived targets (#8 #12 #13 #48 #49 #61-65)\n' ...
         'before handing any of them to another subteam.\n\n'], stored, want);
     error('vd_selftest:staleArtifact', 'tire_coeffs.mat is stale.');
 end
 fprintf('%-32s %s\n', 'tire_coeffs.mat fresh (hash)', 'PASS');
 
-% The hash covers the fit code + TTC data, but NOT vehicle_params.m -- and
-% Fz_design = m*g/4 comes from there. mu is read AT the design load, so a mass
-% change silently invalidates the artifact's grip with a still-green hash.
-% This is exactly how a units slip (546 lb typed into a kg field, Jul 2026)
-% went undetected. Close the loop explicitly.
+% The hash covers the fit code + TTC data, but not vehicle_params.m -- and
 p0 = vehicle_params();
 if ~isfield(T, 'Fz_design_lbf')
     fprintf(2, 'tire_coeffs.mat predates the Fz_design check. Run build_tire_coeffs.\n');
@@ -51,11 +40,11 @@ if ~isfield(T, 'Fz_design_lbf')
 end
 dFz = abs(p0.Fz_design_lbf - T.Fz_design_lbf);
 if dFz > 1e-6 * max(1, T.Fz_design_lbf)
-    fprintf(2, ['\n*** DESIGN LOAD MOVED ***\n' ...
+    fprintf(2, ['\n*** Design load moved ***\n' ...
         'The car mass changed since tire_coeffs.mat was built.\n' ...
         '  artifact built at : %.2f lbf/corner\n' ...
         '  params now give   : %.2f lbf/corner  (m = %.2f kg)\n' ...
-        'Tire mu is read AT the design load and FALLS with load, so the stored\n' ...
+        'Tire mu is read at the design load and falls with load, so the stored\n' ...
         'grip no longer describes this car.\n\n' ...
         'Run:  build_tire_coeffs      then re-issue the grip targets.\n\n'], ...
         T.Fz_design_lbf, p0.Fz_design_lbf, p0.m);
@@ -63,7 +52,7 @@ if dFz > 1e-6 * max(1, T.Fz_design_lbf)
 end
 fprintf('%-32s PASS  (%.1f lbf/corner)\n', 'design load matches artifact', T.Fz_design_lbf);
 
-% Grip must be LOADED, never literal. Catches a future edit that re-introduces
+% Grip must be loaded, never a literal. Catches a future edit that re-introduces
 % `p.mu_y_raw = 2.34;` into the parameter file.
 src  = fileread(fullfile(here, 'vehicle_params.m'));
 body = regexprep(src, '%[^\n]*', '');            % strip comments first
@@ -86,14 +75,14 @@ fprintf('%-32s INFO  (%s)\n', 'grip basis', T.basis);
 % ---------------------------------------------------------------- layer 1
 p = vehicle_params();
 
-% WIRING GUARD (root cause of the silent-circle bug): the friction-ellipse
+% Wiring guard (root cause of the silent-circle bug): the friction-ellipse
 % exponents must actually reach p, or lap_sim's ellipse_exp falls back to n=2
-% (a CIRCLE) with NO error. Fail loudly and specifically if either is missing.
+% (a circle) with no error. Fail with a clear message if either is missing.
 for fld = {'n_env_drive','n_env_brake'}
     if ~isfield(p, fld{1}) || ~isfinite(p.(fld{1}))
         error('vd_selftest:ellipseExpUnwired', ...
             ['p.%s is missing/NaN - vehicle_params did not load it, so lap_sim ' ...
-             'silently uses the n=2 CIRCLE. Re-run build_tire_coeffs and check the ' ...
+             'silently uses the n=2 circle. Re-run build_tire_coeffs and check the ' ...
              'vehicle_params LOADED block.'], fld{1});
     end
 end
@@ -142,17 +131,7 @@ end
 
 % ---------------------------------------------------------------- layer 2
 fprintf('\n-- data anchors --\n');
-% TWO KINDS of check here, deliberately:
-%   (1) RAW-DATA anchor - a number that comes straight off the TTC files and
-%       does NOT depend on the fit method. Frozen tight: if it moves, the data
-%       path itself moved and you want to know.
-%   (2) DERIVED-FROM-FIT invariants - anisotropy, axle grip, the mu(Fz) trend.
-%       These legitimately shift when you improve the fit (e.g. a better SA
-%       artifact filter), so freezing them to 3 decimals means every honest
-%       improvement trips the selftest and trains you to ignore it. Instead we
-%       assert PHYSICAL invariants (ranges, signs, orderings) that catch real
-%       breakage - a sign flip, runaway extrapolation, grip that exceeds the
-%       point mass - without punishing a better fit.
+% Two kinds of check here:
 inr = @(x,lo,hi) double(x >= lo & x <= hi);
 A = {
   % (1) raw-data anchor - fit-method-independent
@@ -187,15 +166,11 @@ if ~pass
 end
 end
 
-
 function files = tire_src_files(here)
-% MUST match build_tire_coeffs/tire_src_files exactly, or every run reads
-% "stale". Includes build_tire_coeffs.m itself: it carries the promotion math
-% (design load, the load-matched shape correction, the anisotropy), so editing
-% it genuinely invalidates the artifact.
-files = {fullfile(here, 'pacejka_fit.m'), ...
-         fullfile(here, 'ttc_fit.m'), ...
-         fullfile(here, 'build_tire_coeffs.m')};
+% must match build_tire_coeffs/tire_src_files exactly, or every run reads
+files = {fullfile(here, 'tire', 'pacejka_fit.m'), ...
+         fullfile(here, 'tire', 'ttc_fit.m'), ...
+         fullfile(here, 'tire', 'build_tire_coeffs.m')};
 d = dir(fullfile(here, 'TTC_Data', '*.mat'));
 for i = 1:numel(d)
     if contains(d(i).name, 'raw'), continue; end     % raw files are not read

@@ -1,17 +1,16 @@
 function lap_report(track_csv)
-% LAP_REPORT  Presentation figures for the lap sim -> plots/.
-%   lap_dashboard_<track>.png  track map + speed trace + achieved g-g
-%   energy_budget.png          endurance demand vs pack (regen scenario)
-% Companion to run_lap_targets (numbers) and lap_replay (animation).
+% LAP_REPORT  Lap dashboard + endurance energy budget figures -> plots/.
+% Prints axle vs point-mass lap times side by side.
 
 if nargin < 1 || isempty(track_csv), track_csv = 'track_endurance.csv'; end
-REGEN_CAPTURE = 0.50;   % fraction of braking energy through the rear motor
-REGEN_RT      = 0.65;   % regen round-trip efficiency (charge->discharge)
-PACK_USABLE_F = 0.90;   % usable fraction of nominal pack energy (est.)
-ENDURANCE_M   = 22000;
-
 p    = vehicle_params();
-here = fileparts(mfilename('fullpath'));
+% Scenario assumptions from p.scenario (vehicle_params) - single source, so these
+% cannot silently drift apart from run_energy_strategy / run_aero_targets.
+REGEN_CAPTURE = p.scenario.regen_capture;
+REGEN_RT      = p.scenario.regen_rt;
+PACK_USABLE_F = p.scenario.pack_usable_f;
+ENDURANCE_M   = p.scenario.endurance_m;   % OFFICIAL rules distance (feasibility basis)
+here = vd_root();
 [~, name] = fileparts(track_csv);  name = strrep(name, 'track_', '');
 [s, kappa, x, y] = load_track(fullfile(here, 'tracks', track_csv));
 [v, t_lap, E] = lap_sim(p, s, kappa, [], true);

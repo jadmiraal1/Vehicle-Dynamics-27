@@ -1,15 +1,5 @@
 function tire_report()
-% TIRE_REPORT  Publication-grade tire model figure suite -> plots/.
-%   tire_curves.png            MF fits vs data, four cornering-test tires
-%   tire_surface.png           3D FY(alpha, Fz) blanket, design tire
-%   tire_mz_trail.png          aligning moment + pneumatic trail
-%   tire_load_sensitivity.png  cross-tire Ca(Fz) and mu(Fz)
-%   tire_friction_cloud.png    combined corner/drive cloud, 18in LC0
-%   tire_longitudinal.png      FX(kappa) MF fit, 18in LC0 drive+brake
-%   tire_extrapolation_band.png  load-sensitivity fits + central/low hi-load band
-%   tire_mz_trail_by_tire.png  cross-tire aligning moment + pneumatic trail, 150 lbf
-%   tire_anisotropy_shape.png  18in LC0 peak back-derivation, visualized
-% Physics: VD_physics_reference.md, sec 8 (forces, Mz, envelope exponent).
+% TIRE_REPORT  Presentation figures for the tire fits -> plots/.
 
 p = vehicle_params();
 evalc('R = pacejka_fit();');
@@ -17,7 +7,7 @@ TIRES  = {'LC0_16x75','R20_16x75','R20_18x60','GY_18x65'};
 tire_c = [0.00 0.45 0.70; 0.90 0.62 0.00; 0.00 0.62 0.45; 0.84 0.37 0.00];
 loads  = [50 100 150 200 250];
 load_c = parula(numel(loads)+1); load_c = load_c(1:end-1, :);
-outdir = fullfile(fileparts(mfilename('fullpath')), 'plots');
+outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 
 % Fig 1: per-tire fits vs binned data
@@ -74,7 +64,7 @@ cb = colorbar('southoutside'); cb.Label.String = 'F_Y [lbf]';
 save_fig(f, fullfile(outdir, 'tire_surface.png'));
 
 % Fig 3: aligning moment + pneumatic trail (design tire)
-D = load_with_mz(fullfile(fileparts(mfilename('fullpath')), 'TTC_Data'), ...
+D = load_with_mz(fullfile(vd_root(), 'TTC_Data'), ...
                  [p.tire_data_prefix '_*.mat']);
 Fz_mag = -D.FZ;
 base = (abs(D.FX./D.FZ) < 0.10) & (Fz_mag > 30) & (abs(D.IA) < 1.5) ...
@@ -129,7 +119,7 @@ sgtitle('Candidate tire comparison — MF fits, TTC R8/R9', 'FontWeight', 'bold'
 save_fig(f, fullfile(outdir, 'tire_load_sensitivity.png'));
 
 % Fig 5: combined friction cloud, 18in LC0 (tire + vehicle axes)
-Dc = load_cloud(fullfile(fileparts(mfilename('fullpath')), 'TTC_Data'));
+Dc = load_cloud(fullfile(vd_root(), 'TTC_Data'));
 Fzc = -Dc.FZ;
 sel = (Fzc > 60) & (abs(Dc.IA) < 3);
 nfx = Dc.FX(sel)./Fzc(sel);   nfy = -Dc.FY(sel)./Fzc(sel);
@@ -195,12 +185,6 @@ title('Longitudinal MF fit - Hoosier 18.0x6.0-10 LC0, TTC R6, ~250 lbf, SA\appro
 save_fig(f, fullfile(outdir, 'tire_longitudinal.png'));
 
 % Fig 7: high-load extrapolation band + side-by-side load-sensitivity fits.
-% Panel B plots EXACTLY what mu_of_load returns - CENTRAL (donor-informed) and
-% LOW (blind-linear) - so the figure always agrees with the model and the
-% artifact. Above the data edge the law is LINEAR (mu(edge)+slope*(Fz-edge)),
-% not a curve, so it never runs away when extrapolated to the outer load. NOTE:
-% if the design edge has reached the donor ceiling the slope FALLS BACK to the
-% measured one, central == low, and the band is genuinely zero (flagged below).
 edge = p.Fz_fit_max;
 cov  = p.hiload_cov_lbf;         % SAME value donor_hiload_slope computed and mu_of_load respects - do not recompute here
 Fz_outer = p.Fz_outer_limit_lbf; % SAME value build_tire_coeffs.m computed - do not recompute here
@@ -272,7 +256,7 @@ f = new_fig([100 60 1000 420]);
 ax1 = subplot(1,2,1); hold(ax1,'on'); style(ax1);
 ax2 = subplot(1,2,2); hold(ax2,'on'); style(ax2);
 for t = 1:4
-    Dt = load_with_mz(fullfile(fileparts(mfilename('fullpath')), 'TTC_Data'), ...
+    Dt = load_with_mz(fullfile(vd_root(), 'TTC_Data'), ...
                        [TIRES{t} '_*.mat']);
     Fz_mag_t = -Dt.FZ;
     base_t = (abs(Dt.FX./Dt.FZ) < 0.10) & (Fz_mag_t > 30) & (abs(Dt.IA) < 1.5) ...
@@ -298,11 +282,6 @@ sgtitle(sprintf('Cross-tire aligning moment & pneumatic trail — TTC R8, %.0f l
 save_fig(f, fullfile(outdir, 'tire_mz_trail_by_tire.png'));
 
 % Fig 9: the anisotropy shape correction, visualized. build_tire_coeffs.m
-% back-derives the 18in LC0's lateral PEAK from its measured value at 6deg,
-% using the design tire's own MF curve shape at the load-matched Fz (Fz_lat6)
-% as the correction factor (shape6 = value@6deg / curve peak). This is the
-% one nontrivial derived number in the whole pipeline with no supporting
-% figure - draw the curve, mark the 6deg point, mark the implied peak.
 f = new_fig([80 80 900 620]);
 ax = axes(f); hold(ax, 'on'); style(ax);
 aa9 = linspace(0, 20, 400);
@@ -329,7 +308,6 @@ save_fig(f, fullfile(outdir, 'tire_anisotropy_shape.png'));
 fprintf('tire_report: 9 figures written to plots/\n');
 end
 
-
 function D = load_cloud(data_dir)
 channels = {'SA','FY','FX','FZ','IA'};
 files = dir(fullfile(data_dir, 'LC0_18x60_*.mat'));
@@ -344,7 +322,6 @@ for c = 1:numel(channels)
     D.(channels{c}) = vertcat(chunks{:,c});
 end
 end
-
 
 function y = mf(prm, a)
 Bx = prm(1).*a;

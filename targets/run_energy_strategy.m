@@ -1,25 +1,18 @@
 function out = run_energy_strategy()
-% RUN_ENERGY_STRATEGY  Endurance feasibility: power-cap x regen sweep.
-% T-STRAT: the "how do we finish endurance" table (targets #43/#44/#65).
-% Consumers: powertrain (deployment), controls (VCU torque map cap),
-% electrical (BMS SOC window decision - attach this table).
-%
-% Method: run lap_sim on the endurance course with p.P_max overridden by
-% each candidate cap; net 22 km energy = (drive - regen credit) x laps;
-% feasible when it fits the usable pack WITH margin. Scenario constants
-% below are assumptions until the regen implementation and pack load test
-% pin them - re-run then.
+% RUN_ENERGY_STRATEGY  Endurance power-cap sweep: lap time vs energy, regen scenarios.
 
 p = vehicle_params();
 
 P_CAPS_KW     = [62.7 50 45 40 35 30 28 25 22 20];
-REGEN_CAPTURE = 0.50;    % fraction of braking energy through the rear motor
-REGEN_RT      = 0.65;    % round-trip efficiency of recovered energy
-PACK_USABLE_F = 0.90;    % usable fraction of nominal pack (BMS window TBD)
-MARGIN        = 0.90;    % design margin on usable energy (heat/driver/cones)
-ENDURANCE_M   = 22000;
+% Scenario assumptions come from p.scenario (vehicle_params) - single source, so
+% these cannot silently drift apart from lap_report / run_aero_targets.
+REGEN_CAPTURE = p.scenario.regen_capture;
+REGEN_RT      = p.scenario.regen_rt;
+PACK_USABLE_F = p.scenario.pack_usable_f;
+MARGIN        = p.scenario.margin;
+ENDURANCE_M   = p.scenario.endurance_m;   % OFFICIAL rules distance (feasibility basis)
 
-here = fileparts(mfilename('fullpath'));
+here = vd_root();
 [s, kappa, ~, ~, prov] = load_track(fullfile(here, 'tracks', 'track_endurance.csv'));
 laps   = ENDURANCE_M / s(end);
 usable = PACK_USABLE_F * p.E_pack_Wh / 1000;    % [kWh]
@@ -47,8 +40,8 @@ end
 
 cap_rg = max(P_CAPS_KW(E_rg <= MARGIN*usable), [], 'omitnan');
 cap_nr = max(P_CAPS_KW(E_nr <= MARGIN*usable), [], 'omitnan');
-fprintf('\nT-STRAT DECISIONS\n');
-fprintf('  1. REGEN IS REQUIRED: without it the margin-safe cap is %.0f kW\n', cap_nr);
+fprintf('\nT-STRAT decisions\n');
+fprintf('  1. Regen is required: without it the margin-safe cap is %.0f kW\n', cap_nr);
 fprintf('     (+%.1f s/lap); with %.0f%%x%.0f%% regen the cap rises to %.0f kW.\n', ...
         interp1(P_CAPS_KW, t_lap, cap_nr) - t_lap(1), ...
         100*REGEN_CAPTURE, 100*REGEN_RT, cap_rg);
@@ -56,10 +49,10 @@ fprintf('  2. Endurance VCU power cap: %.0f kW (margin-safe with regen).\n', cap
 fprintf('  3. BMS SOC window: table assumes %.0f%% usable - attach this table\n', ...
         100*PACK_USABLE_F);
 fprintf('     to the window decision; each +5%% usable is ~+2-3 kW of cap.\n');
-fprintf('  CONSISTENCY: at %.0f kW the mean pack current ~%.0f A vs %.0f A main fuse.\n', ...
+fprintf('  Consistency: at %.0f kW the mean pack current ~%.0f A vs %.0f A main fuse.\n', ...
         cap_rg, cap_rg*1e3/p.V_pack_nom * (t_lap(1)/interp1(P_CAPS_KW,t_lap,cap_rg)) * 0.8, ...
         p.I_fuse_main);
-fprintf('  CAVEAT: QSS point-mass; regen scenario + usable window are assumptions;\n');
+fprintf('  Caveat: QSS point-mass; regen scenario + usable window are assumptions;\n');
 fprintf('          re-run after pack load test and regen implementation.\n');
 
 out = struct('P_caps_kW', P_CAPS_KW, 'E_noregen_kWh', E_nr, 'E_regen_kWh', E_rg, ...
@@ -75,11 +68,9 @@ catch e
 end
 end
 
-
 function s = feas(E, usable)
 if E <= usable, s = 'OK'; else, s = 'DNF'; end
 end
-
 
 function make_plot(caps, E_nr, E_rg, t_lap, usable, margin, rc, rt, here)
 f = figure('Visible', 'off', 'Position', [80 80 980 520], 'Color', 'w');

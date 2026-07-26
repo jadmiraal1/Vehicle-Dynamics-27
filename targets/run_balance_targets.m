@@ -1,8 +1,5 @@
 function out = run_balance_targets()
-% RUN_BALANCE_TARGETS  Chassis/aero balance targets from the mid-tier
-% axle-grip model: T-SKD2 load-sensitive skidpad | T-LLTD roll stiffness
-% split | T-BAL aero CoP band (target #38).
-% Model: axle_grip.m; theory: VD_physics_reference.md, section 11.
+% RUN_BALANCE_TARGETS  Mid-tier balance: skidpad w/ load sensitivity, LLTD + CoP bands.
 
 p = vehicle_params();
 
@@ -52,9 +49,9 @@ LLTD_hi  = LLTD_SWEEP(cand(end));
 
 fprintf('T-LLTD roll stiffness split : neutral %.2f (ay peaks %.3f g);\n', ...
         LLTD_neutral, ay_peak);
-fprintf('       RECOMMEND %.2f-%.2f front (front-limited = stable at the limit,\n', ...
+fprintf('       recommend %.2f-%.2f front (front-limited = stable at the limit,\n', ...
         LLTD_rec, LLTD_hi);
-fprintf('       <=%.0f%% grip cost). Below neutral the car is REAR-limited: snap.\n', ...
+fprintf('       <=%.0f%% grip cost). Below neutral the car is rear-limited: snap.\n', ...
         100*GRIP_COST_MAX);
 if any(lift)
     fprintf('       inner wheel lift above LLTD %.2f.\n', LLTD_SWEEP(find(lift, 1)));
@@ -79,8 +76,8 @@ fprintf('       (at ClA %.1f, LLTD %.2f: front-limited at %.0f m/s, high-speed\n
         CLA_TARGET, LLTD_rec, V_HIGH);
 fprintf('       ay %.2f-%.2f g across the band). Rear of the band flips the\n', ...
         min(ay_hi(stab)), max(ay_hi(stab)));
-fprintf('       fast-corner limit to the REAR axle: high-speed oversteer.\n');
-fprintf('CAVEAT: single-knob LLTD (no roll centers/unsprung split), no camber,\n');
+fprintf('       fast-corner limit to the rear axle: high-speed oversteer.\n');
+fprintf('Caveat: single-knob LLTD (no roll centers/unsprung split), no camber,\n');
 fprintf('        steady state, CoP fixed with speed (real undertray CoP moves\n');
 fprintf('        with ride height/pitch -- transient model will see this).\n');
 
@@ -98,7 +95,6 @@ catch e
     fprintf('[plot skipped: %s]\n', e.message);
 end
 end
-
 
 function make_plot(p, o, t_real, v_low, v_high, cla_t)
 f = figure('Visible', 'off', 'Position', [60 60 1240 420], 'Color', 'w');
@@ -132,7 +128,7 @@ xlabel('front downforce fraction (CoP)'); ylabel(sprintf('a_y limit @ %.0f m/s [
 title(sprintf('T-BAL @ ClA %.1f, LLTD %.2f', cla_t, o.LLTD_rec));
 legend('Location', 'southwest'); grid on;
 
-outdir = fullfile(fileparts(mfilename('fullpath')), 'plots');
+outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
 saveas(f, fullfile(outdir, 'balance_targets.png'));
 close(f);

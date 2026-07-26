@@ -1,15 +1,7 @@
 function B = bicycle_model(p, Ca_axle_f, Ca_axle_r, v_sweep)
-% BICYCLE_MODEL  Linear two-axle (single-track) handling model.
-%   B = bicycle_model(p, Ca_axle_f, Ca_axle_r, v_sweep)
-%   Axle cornering stiffnesses in N/rad (belt->track scaling already applied
-%   by the caller); v_sweep in m/s. Theory: VD_physics_reference.md, sec 10.
-%
-% Returns:
-%   B.K_rad, B.K_deg      understeer gradient [rad/g], [deg/g]
-%   B.v_crit / B.v_char   critical (K<0) or characteristic (K>0) speed [m/s]
-%   B.v, B.yaw_gain       steady-state r/delta [(deg/s)/deg] over v_sweep
-%   B.tau_slow, B.zeta_eq transient yaw mode over v_sweep
-%   B.A(v)                yaw-plane state matrix handle, states [beta; r]
+% BICYCLE_MODEL  Linear single-track handling model.
+%   B = bicycle_model(p, Ca_f, Ca_r, v_sweep)  -> K, v_crit/char, yaw gain, yaw mode.
+% Theory: ref doc sec 10.
 
 % --- Input validation ---
 req_fields = {'m','Izz','a','b','L','g','Wf_static','Wr_static'};
@@ -48,7 +40,6 @@ for i = 1:numel(v_sweep)
     B.zeta_eq(i)  = -sum(real(ev)) / (2*wn);
 end
 end
-
 
 function A = yaw_plane_A(p, Caf, Car, v)
 % States [beta; r]: m*v*(beta_dot + r) = Fyf + Fyr, Izz*r_dot = a*Fyf - b*Fyr

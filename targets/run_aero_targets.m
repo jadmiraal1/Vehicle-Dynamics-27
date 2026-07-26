@@ -1,24 +1,8 @@
 function out = run_aero_targets()
-% RUN_AERO_TARGETS  Aero package targets from the points model.
-% T-CLA downforce target | T-CDA drag budget | T-LDF device L/D floor |
-% T-XR exchange rates (pts per m^2, pts per kg).
-%
-% Method: sweep added downforce along ACHIEVABLE PACKAGE LINES
-% (CdA = CdA0 + dClA/LD_package, mass = m0 + dm*dClA), score each point
-% against the REAL FSAE 2026 Michigan benchmarks (comp_benchmarks_2026.csv),
-% with the endurance power cap re-solved per point so drag pays its true
-% energy price. Theory + caveats: VD_physics_reference.md; consumers: aero.
-%
-% KEY FINDING (Jul 2026): points are monotonically increasing in ClA up to
-% the sweep edge (ClA ~5) for every scenario tested (eta 0.84-0.92, haircut
-% 4-12%, mass penalty 3-8 kg/m^2, package L/D 3-5). The binding constraint
-% is the rules envelope and packaging, NOT lap physics. So the deliverable
-% is a target BAND plus exchange rates and floors, not an interior optimum.
-%
-% Runtime: several minutes (each sweep point runs ~5 lap sims).
+% RUN_AERO_TARGETS  ClA / CdA / L/D / aero-balance targets vs 2026 benchmarks.
 
 p = vehicle_params();
-here = fileparts(mfilename('fullpath'));
+here = vd_root();
 
 % Sweep and package assumptions
 DCLA        = 0:0.75:3.75;   % added downforce [m^2]
@@ -31,14 +15,12 @@ LD_TARGET   = 4.0;           % package L/D at the issued target [-]
 HAIRCUT     = 0.08;   % sprint-event time inflation vs QSS (2026-calibrated)
 EF_MAX      = 0.60;   % best real 2026 efficiency factor PROVISIONAL
 E_MIN_KWH   = 2.696;  % lowest real 22-lap finisher energy (Wisconsin)
-LAPS        = 22;     % real 2026 endurance (21.2 km on our 964 m course).
-                      % NOTE: run_energy_strategy uses the RULES distance
-                      % (22.0 km -> 22.8 laps), ~4% more energy. Deliberate:
-                      % scoring vs real 2026 Tmins uses the real event basis;
-                      % the deployment strategy plans for the rules distance.
+LAPS        = p.scenario.benchmark_laps;  % real-2026 event basis, from p.scenario.
+                      % Deliberately not the rules distance: E_MIN_KWH above is a
 
 % Endurance strategy (must match run_energy_strategy.m)
-REGEN_CAPTURE = 0.50;  REGEN_RT = 0.65;  PACK_USABLE_F = 0.90;  MARGIN = 0.90;
+REGEN_CAPTURE = p.scenario.regen_capture;  REGEN_RT      = p.scenario.regen_rt;
+PACK_USABLE_F = p.scenario.pack_usable_f;  MARGIN        = p.scenario.margin;
 
 bm = read_benchmarks(fullfile(here, 'organization', 'comp_benchmarks_2026.csv'));
 
@@ -75,7 +57,7 @@ fprintf('%12s'  , 'added ClA:');  fprintf(' %7.2f', DCLA);  fprintf('\n');
 for i = 1:numel(LD_PKG)
     fprintf('pkg L/D %3.0f:', LD_PKG(i));  fprintf(' %7.0f', P(i,:));  fprintf('\n');
 end
-fprintf('\nT-CLA  downforce target : ClA = %.1f m^2  (band 3.5-4.5; points MONOTONIC in ClA\n', CLA_TARGET);
+fprintf('\nT-CLA  downforce target : ClA = %.1f m^2  (band 3.5-4.5; points monotonic in ClA\n', CLA_TARGET);
 fprintf('       to the sweep edge -- package as much as rules + structure allow)\n');
 fprintf('T-CDA  drag budget      : CdA <= %.2f m^2 at ClA %.1f  (package L/D >= %.1f)\n', ...
         d_t.CdA, CLA_TARGET, LD_TARGET);
@@ -83,12 +65,12 @@ fprintf('T-XR   exchange rates   : %+.1f pts/m^2 ClA | %+.1f pts/m^2 CdA | %+.2f
         xr_cla, xr_cda, xr_m);
 fprintf('T-LDF  device L/D floor : %.1f incl. %.0f kg/m^2 mass (drag-only %.1f) --\n', ...
         ld_floor_full, DM_PER_CLA, ld_floor_drag);
-fprintf('       no device below L/D ~2 with margin; floor RISES with total ClA\n');
+fprintf('       no device below L/D ~2 with margin; floor rises with total ClA\n');
 fprintf('T-BAL  balance (prov.)  : front downforce fraction 35-45%% (CoP at/just aft\n');
 fprintf('       of CG) -- PROVISIONAL until the bicycle+CoP model (target #38)\n');
 fprintf('at target: %.0f pts (%+.0f vs baseline); endurance cap re-solves to %.0f kW, %.2f kWh\n', ...
         pts_t, pts_t - pts0, d_t.cap/1e3, d_t.E22);
-fprintf('CAVEAT: QSS point-mass, scalar mu (no load sensitivity on added mass),\n');
+fprintf('Caveat: QSS point-mass, scalar mu (no load sensitivity on added mass),\n');
 fprintf('        haircut/EF_MAX/regen/mass-penalty are calibrated assumptions.\n');
 fprintf('        Re-issue on: mid-tier balance model, lambda calibration, mass change.\n');
 
@@ -106,13 +88,11 @@ catch e
 end
 end
 
-
 function [pts, d] = score_point(ctx, dcla, ld_pkg, dm_per_cla)
 % Package line: drag and mass follow added downforce
 CdA = ctx.p.CdA + dcla / ld_pkg;            % inf -> baseline drag
 [pts, d] = score_point_abs(ctx, dcla, CdA, dm_per_cla * dcla);
 end
-
 
 function [pts, d] = score_point_abs(ctx, dcla, CdA, dm)
 p2      = ctx.p;
@@ -151,7 +131,6 @@ d = struct('t_ac', t_ac, 't_sk', t_sk, 't_ax', t_ax, 't_en', t_en, ...
            't_tot', t_tot, 'E22', E22, 'cap', cap, 'CdA', p2.CdA);
 end
 
-
 function [t_en, E22, cap] = solve_endurance(ctx, p2)
 % E_net(cap) is smooth; 3 points + quadratic root beats a bisection loop
 caps = [20e3 32e3 46e3];
@@ -171,7 +150,6 @@ p3 = p2;  p3.P_max = cap;
 E22 = (E.drive_acc_Wh - E.brake_wheel_Wh * ctx.rc * ctx.rt) * ctx.laps / 1000;
 end
 
-
 function s = tscore(t, tmin, fmax, pvar, pmin, squared)
 % FSAE event score. Tmin floors at OUR time (we'd set the benchmark).
 tmin = min(t, tmin);
@@ -182,7 +160,6 @@ else,       ratio =  tmax/t    - 1;  rmax =  tmax/tmin    - 1;
 end
 s = pvar * ratio / rmax + pmin;
 end
-
 
 function bm = read_benchmarks(fname)
 fid = fopen(fname, 'r');
@@ -199,7 +176,6 @@ while true
 end
 fclose(fid);
 end
-
 
 function make_plot(p, DCLA, LD_PKG, P, pts0, cla_t, pts_t, here)
 f = figure('Visible', 'off', 'Position', [80 80 900 520], 'Color', 'w');

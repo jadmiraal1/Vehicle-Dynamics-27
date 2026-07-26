@@ -1,17 +1,6 @@
 function [s, kappa, x, y, prov] = load_track(fname)
-% LOAD_TRACK  Read a digitized track CSV into (s, kappa[, x, y, prov]).
-%
-% Columns: s_m, x_m, y_m, kappa_1perm.
-% Produce with `python digitize_track.py --all` (in tracks/).
-%
-% The CSV carries a '#' provenance header written by the digitizer: source
-% PNG + md5, the AUTO-CALIBRATED grid scale, course length, and whether the
-% slalom cone spacings were verified against a readable map export. This
-% function skips those lines and (optionally) returns them, so a run script
-% can print exactly which map and which scale produced its lap time.
-%
-% Header length is DETECTED, not assumed - the previous version hard-coded
-% 'NumHeaderLines', 1 and would silently misread any CSV with provenance.
+% LOAD_TRACK  Read digitized track CSV -> s, kappa[, x, y, provenance].
+% Skips '#' provenance headers (auto-detected, not assumed).
 
 fid = fopen(fname, 'r');
 if fid < 0

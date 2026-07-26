@@ -1,26 +1,7 @@
 function out = aligning_moment()
-% ALIGNING_MOMENT  Steering targets from the tire self-aligning moment (#52-54):
-%   T-MZ   peak self-aligning torque / tire   -> rack force / steering effort (#54)
-%   T-CAS  caster / mechanical-trail TRANSFER -> caster choice (#20). VD delivers
-%          torque-vs-caster from the full measured trail(alpha) curve + a cited
-%          practice window; the steering team picks the value against its effort
-%          budget. No invented threshold selects it.
-% A single "initial pneumatic trail" number is reported ONLY as a diagnostic - the
-% caster chart uses the whole trail(alpha) curve, so no single-angle value feeds a
-% target. Trail-collapse cue (where the steering "goes light"). Uses the DESIGN
-% tire's OWN Mz(Fz) and trail(Fz), self-extrapolated to the front-outer limit
-% load (a short reach). Donor borrowing is NOT used here: the cross-tire Mz/trail
-% shape scatters ~8-10% (vs ~1% for grip), so it would hurt, not help.
-% Aligning-moment background: VD_physics_reference.md, section 8.
-%
-% BELT -> TRACK SCALING (do not invent these):
-%   pneumatic trail   lambda_t = 1.0   Pacejka scaling factors default to 1.0 and
-%       the deviation is MEASURED, not assumed. Trail at low slip = aligning
-%       stiffness / cornering stiffness - BOTH structural - so even though each
-%       drops ~4-8% belt->track, the RATIO (the trail) is ~surface-invariant.
-%   Mz magnitude follows the FORCE, so its belt->track factor sits between the
-%       grip derate (mu_derate, at the grip-limited part of the curve) and the
-%       stiffness scaling (lambda_Ca, at the low-slip part). We report the band.
+% ALIGNING_MOMENT  Steering targets from tire self-aligning moment (#52-54):
+% T-MZ peak torque/tire, T-CAS caster transfer chart, trail diagnostics.
+% Theory: ref doc sec 8 and 13.
 
 p = vehicle_params();
 
@@ -35,10 +16,10 @@ G         = axle_grip(p, V_LOW);            % returns per-tire loads in G.Fz.{fo
 Fz_fo_lbf = G.Fz.fo / N_PER_LBF;
 
 % --- design tire: peak |Mz| and initial pneumatic trail per load bin (own data)
-here  = fileparts(mfilename('fullpath'));
+here  = vd_root();
 D     = load_mz(fullfile(here, 'TTC_Data'), [p.tire_data_prefix '_*.mat']);
 Fz    = -D.FZ;
-% ~(5..7 deg) drops the TTC sweep-REVERSAL band: at the slip-sweep turnaround the
+% ~(5..7 deg) drops the TTC sweep-reversal band: at the slip-sweep turnaround the
 % tire is transient (not steady state), so Fy/Mz there dip artificially -> a fake
 % valley at ~6 deg. Same exclusion pacejka_fit uses. Curves cross the gap smoothly.
 base  = (abs(D.FX./D.FZ) < 0.10) & (Fz > 30) & (abs(D.IA) < 1.5) & (D.P > 9) & (D.P < 13) ...
@@ -50,11 +31,7 @@ for k = 1:numel(loads)
     if nnz(sel) < 3000, continue; end
     Fzb(end+1)  = mean(Fz(sel));                                    %#ok<AGROW>
     mzpk(end+1) = pctl(abs(D.MZ(sel)), 95);                        %#ok<AGROW> peak |Mz| [lbf-ft]
-    % OPERATING-range trail (1-3 deg), NOT the alpha->0 value: at 0 slip trail
-    % is 0/0, and the textbook slope-ratio (dMz/dalpha)/(dFy/dalpha) is too noisy
-    % in this data (tiny Mz near the origin -> garbage/negative). The car runs at
-    % 1-4 deg anyway, so the operating-band trail is both robust and the relevant
-    % one for caster. It collapses to ~0 by the limit (see the plot).
+    % operating-range trail (1-3 deg), not the alpha->0 value: at 0 slip trail
     lo = sel & (abs(D.SA) > 1) & (abs(D.SA) < 3);
     tp0(end+1)  = median(abs(D.MZ(lo)) ./ max(abs(D.FY(lo)),1)) * 12;  %#ok<AGROW> [in]
 end
@@ -62,7 +39,7 @@ end
 % --- fits + short self-extrapolation to the front-outer load
 mz_coef = polyfit(Fzb, mzpk, 2);      % peak Mz ~ quadratic in load
 tp_coef = polyfit(Fzb, tp0,  1);      % initial trail ~ linear in load
-edge     = max(Fz(base));          % furthest MEASURED load (not the bin mean)
+edge     = max(Fz(base));          % furthest measured load (not the bin mean)
 edge_fit = max(Fzb);               % last fit anchor (bin means thin out up high)
 gap_pct  = 100*(Fz_fo_lbf/edge - 1);
 
@@ -83,32 +60,20 @@ if Fz_fo_lbf > edge
     fprintf('     -> %+.0f%% past the furthest measured load (%.0f lbf); fit anchored to %.0f lbf.\n', ...
             gap_pct, edge, edge_fit);
     fprintf('        Mz is smooth/monotonic - short reach. For a conservative rack you can\n');
-    fprintf('        instead take the peak MEASURED Mz + margin and skip extrapolation.\n');
+    fprintf('        instead take the peak measured Mz + margin and skip extrapolation.\n');
 end
-fprintf('  (diag) operating pneumatic trail @1-3deg: %.1f mm  (lambda_t=%.1f) - DIAGNOSTIC ONLY.\n', ...
+fprintf('  (diag) operating pneumatic trail @1-3deg: %.1f mm  (lambda_t=%.1f) - diagnostic only.\n', ...
         trail_mm, LAMBDA_T);
-fprintf('        Not a delivered target: the caster chart below uses the FULL measured\n');
+fprintf('        Not a delivered target: the caster chart below uses the full measured\n');
 fprintf('        trail(alpha) curve, so this single-angle value feeds nothing downstream.\n');
 fprintf('  T-MZ  peak self-align torque  : %.1f-%.1f N*m/tire  (track band: mu_derate..lambda_Ca)\n', ...
         Mz_lo_Nm, Mz_hi_Nm);
 fprintf('        belt (upper bound, size rack to it): %.1f N*m/tire\n', Mz_belt*NM_PER_FTLB);
-fprintf('  NOTE: pneumatic trail COLLAPSES to ~0 at the limit -> at-limit aligning\n');
-fprintf('        torque is MECHANICAL trail (caster) only. Pick caster so mechanical\n');
+fprintf('  Note: pneumatic trail collapses to ~0 at the limit -> at-limit aligning\n');
+fprintf('        torque is mechanical trail (caster) only. Pick caster so mechanical\n');
 fprintf('        trail alone gives limit feel; total trail sub-limit is not too heavy.\n');
 
-% --- T-CAS: caster / mechanical-trail DESIGN CHART ----------------------
-% Steering torque per front tire = Fy(a) * (t_mech + t_pneu(a)). Pneumatic trail
-% collapses toward the limit (see plot), so with ZERO caster the torque peaks
-% mid-corner (~4 deg) then goes light AT the grip limit - the wheel stops telling
-% the driver where the edge is. Mechanical trail (caster) is a CONSTANT lever arm
-% that does not collapse, so it keeps torque up at the limit.
-%
-% VD does NOT pick the caster number - that needs the steering RATIO (to turn tire
-% torque into effort at the driver's hands) which is a steering-subsystem variable,
-% plus driver preference (subjective). So VD delivers the TRANSFER: torque/tire vs
-% caster, and flags the practice-consistent window. Every number below is either
-% MEASURED from the tire data (torques) or a CITED practice range (caster 3-6 deg).
-% Nothing here is an invented threshold.
+% --- T-CAS: caster / mechanical-trail design chart ----------------------
 [alc, Fyc, tpc] = curve_at_load(D, base, 250);      % Fy [lbf], trail [mm] vs |slip|
 Fyc = Fyc * p.mu_derate;                            % track magnitude
 [~, ilim] = max(Fyc);                               % grip-limit slip index
@@ -162,7 +127,6 @@ catch e
 end
 end
 
-
 function [al, Fy, tp] = curve_at_load(D, base, load)
 % Fy [lbf] and pneumatic trail [mm] vs |slip| at one load bin (curve shape).
 Fz  = -D.FZ;
@@ -178,7 +142,6 @@ for i = 1:numel(edges)-1
     end
 end
 end
-
 
 function caster_plot(al, Fy, tp, tmechs, NPL, here)
 f = figure('Visible','off','Position',[80 80 660 480],'Color','w');
@@ -198,7 +161,6 @@ if exist('exportgraphics','file'), exportgraphics(f, fullfile(outdir,'caster_tar
 else, saveas(f, fullfile(outdir,'caster_target.png')); end
 close(f);
 end
-
 
 function make_plot(p, D, base, loads, o, Fz_fo, edge)
 Fz = -D.FZ;
@@ -233,13 +195,12 @@ xline(ax2, edge, ':', 'data edge', 'HandleVisibility','off');
 xline(ax2, Fz_fo, '--', 'front-outer', 'HandleVisibility','off');
 xlabel(ax2,'F_Z [lbf]'); title(ax2,'Peak M_z & trail vs load (design point extrapolated)');
 
-outdir = fullfile(fileparts(mfilename('fullpath')),'plots');
+outdir = fullfile(vd_root(),'plots');
 if ~exist(outdir,'dir'), mkdir(outdir); end
 if exist('exportgraphics','file'), exportgraphics(f, fullfile(outdir,'aligning_moment.png'),'Resolution',170);
 else, saveas(f, fullfile(outdir,'aligning_moment.png')); end
 close(f);
 end
-
 
 function [x, y] = trail_curve(sa, mz, fy)
 a = abs(sa); mza = abs(mz); fya = abs(fy);
@@ -253,7 +214,6 @@ for i = 1:numel(edges)-1
 end
 end
 
-
 function D = load_mz(data_dir, pattern)
 channels = {'SA','FY','FX','FZ','IA','P','MZ'};
 files = dir(fullfile(data_dir, pattern));
@@ -266,7 +226,6 @@ for i = 1:numel(files)
 end
 for c = 1:numel(channels), D.(channels{c}) = vertcat(chunks{:,c}); end
 end
-
 
 function v = pctl(x, q)
 x = sort(x(~isnan(x))); n = numel(x);

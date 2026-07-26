@@ -1,11 +1,9 @@
 function R = pacejka_fit()
-% PACEJKA_FIT  Magic Formula pure-lateral fit for ALL candidate tires.
-% FY = D*sin(C*atan(B*a - E*(B*a - atan(B*a)))), a in deg, forces in lbf.
-% Method, artifact handling, interpretation: VD_physics_reference.md, sec 8.
-% R.(tire) holds each tire's fit; the design tire (p.tire_data_prefix) is
-% mirrored at top level (Ca_coef, mu_coef, eval, ...) for downstream code.
+% PACEJKA_FIT  Magic Formula fit per load bin, all candidate tires.
+% Returns mu(Fz) and Ca(Fz) coefficients + the combined-slip envelope exponents
+% from the 18in LC0 held-SA sweeps. Theory: ref doc sec 8.
 
-% THIS IS NOW THE SOURCE OF DESIGN GRIP (Jul 2026). Promoted into the car by
+% THIS IS now THE SOURCE OF design GRIP (Jul 2026). Promoted into the car by
 % build_tire_coeffs -> tire_coeffs.mat -> vehicle_params. Do not hand-copy
 % anything out of this function's printout into vehicle_params.
 
@@ -20,7 +18,7 @@ SA_EDGES      = 0.25:0.5:12.25;      % |slip angle| bins [deg], discretizes the 
 MIN_BIN_N     = 40;                  % each slip angle bin req 40 samples to be trustworthy
 MIN_TREND_PTS = 3;                   % min valid load bins needed for mu/Ca vs load trend fits
 
-here     = fileparts(mfilename('fullpath'));
+here     = vd_root();
 data_dir = fullfile(here, 'TTC_Data');
 N_PER_LBF        = 4.44822; % conversion rates
 LBF_DEG_TO_N_RAD = N_PER_LBF * 180/pi;
@@ -35,10 +33,6 @@ for t = 1:numel(TIRES)
     Fz_mag = -D.FZ;
 
     % Pure lateral, near-zero camber, near-target pressure; drop the
-    % +/-5..7 deg sweep-junction artifact (mask to clean data). Symmetric
-    % on both sides: binned_median_curve folds -SA onto +SA, so an
-    % unfiltered artifact on the negative side would leak into the
-    % "clean" curve just as easily as one on the positive side.
     base = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 30) & (abs(D.IA) < 1.5) ...
            & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0);
 
@@ -71,7 +65,7 @@ for t = 1:numel(TIRES)
     end
 
     % Load dependence: Ca quadratic over all bins; mu LINEAR in load
-    % (Pacejka pDy1/pDy2 form), fitted ONLY over bins whose peak sits
+    % (Pacejka pDy1/pDy2 form), fitted only over bins whose peak sits
     % inside the 12-deg sweep - D is unidentifiable when still rising
     ok  = ~isnan(T.Fz_lbf);
     n_ok = nnz(ok);
@@ -116,9 +110,6 @@ end
 R.eval = @(alpha_deg, Fz_lbf) mf_at_load(Td, alpha_deg, Fz_lbf);
 
 % Clamp the same way mf_at_load/R.eval does, so this printed summary can
-% never silently diverge from what R.eval actually returns for the design
-% load (mu_coef/Ca_coef are only valid inside the tested load range and
-% can run away fast just outside it, especially the quadratic Ca_coef).
 ok_d       = ~isnan(Td.Fz_lbf);
 Fz_clamped = min(max(Fz_design, min(Td.Fz_lbf(ok_d))), max(Td.Fz_lbf(ok_d)));
 if Fz_clamped ~= Fz_design
@@ -135,13 +126,11 @@ fprintf('Note: MF peak reads the median curve; ttc_fit 99th percentile reads the
 fprintf('upper envelope. Figures: run tire_report (presentation layer).\n');
 end
 
-
 function y = mf(p, alpha)
 % Magic Formula, pure slip. p = [B C D E], alpha in deg.
 Bx = p(1) .* alpha;
 y  = p(3) .* sin(p(2) .* atan(Bx - p(4).*(Bx - atan(Bx)))); 
 end
-
 
 function prm = fit_mf(alpha, fy)
 % Least-squares MF fit with bounds; falls back to fminsearch w/o toolbox.
@@ -163,7 +152,6 @@ else
 end
 end
 
-
 function [x, y] = binned_median_curve(sa, fy, edges, min_n)
 % Symmetrized |SA| median curve (robust to sweep artifacts/hysteresis).
 fy_odd = fy;  fy_odd(sa < 0) = -fy_odd(sa < 0);
@@ -178,7 +166,6 @@ for i = 1:numel(edges)-1
 end
 end
 
-
 function fy = mf_at_load(T, alpha_deg, Fz_lbf)
 % Evaluate a tire's fit at arbitrary load: B,C,E interpolated (clamped),
 % D from its load quadratic.
@@ -190,7 +177,6 @@ prm = [interp1(T.Fz_lbf(ok), T.B(ok), Fz), ...
        interp1(T.Fz_lbf(ok), T.E(ok), Fz)];
 fy = mf(prm, alpha_deg);
 end
-
 
 function L = fit_longitudinal(data_dir)
 % FX vs slip ratio at SA~0, 18in LC0, ~250 lbf; drive and brake fitted
@@ -259,18 +245,11 @@ for sides = {{'drive', +1}, {'brake', -1}} % split + and - samples into drive an
 end
 
 % Lateral reference for the mu_x/mu_y anisotropy transfer.
-% The 18in donor never gets a full lateral sweep (SA is HELD at ~0/-3/-6 deg),
-% so its lateral PEAK is not measured - only its value at 6 deg. We export that
-% value and the load it was taken at; build_tire_coeffs applies the shape
-% correction using the design tire's MF curve AT THIS LOAD. Exporting Fz_lat6
-% (rather than assuming the design load) is what lets the correction be
-% load-matched -- the previous hand-calc used the 183 lbf shape factor on
-% 245 lbf data, and tire curves flatten with load.
 lat6 = (abs(D.IA) < 1.5) & (abs(Fz_mag - 250) < 35) & (abs(SR) < 0.005) ...
        & (abs(abs(D.SA) - 6) < 0.6);
 L.mu_y_at6 = median(abs(D.FY(lat6)) ./ Fz_mag(lat6));
 L.Fz_lat6  = median(Fz_mag(lat6));
-fprintf('%6s lateral @6deg: mu_y %.3f at Fz %.0f lbf (peak NOT swept;', ...
+fprintf('%6s lateral @6deg: mu_y %.3f at Fz %.0f lbf (peak not swept;', ...
         '18in', L.mu_y_at6, L.Fz_lat6);
 fprintf(' shape-corrected in build_tire_coeffs)\n');
 
@@ -302,7 +281,6 @@ for sides = {{'drive', +1}, {'brake', -1}}
 end
 end
 
-
 function v = prctile_local(x, q)
 x = sort(x(~isnan(x)));
 n = numel(x);
@@ -311,7 +289,6 @@ rank = q/100 * (n - 1);
 lo   = floor(rank);
 v    = x(lo+1) + (rank - lo) * (x(min(lo+2, n)) - x(lo+1));
 end
-
 
 function D = load_channels(data_dir, pattern)
 channels = {'SA','FY','FX','FZ','IA','P'};
