@@ -44,5 +44,7 @@ GG.N             = N;
 GG.ay            = a_lat   ./ p.g;
 GG.ax_accel      = a_accel ./ p.g;
 GG.ax_brake      = a_brake ./ p.g;
+GG.ax_motor      = a_motor ./ p.g;       % motor-limited alone (ax_limit reuses this)
+GG.ax_traction   = a_traction ./ p.g;    % traction-limited alone, constant-mu
 GG.power_limited = F_power < F_torque;
 end

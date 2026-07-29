@@ -44,7 +44,11 @@ p.T_motor_cont  = 125;    % continuous motor torque [Nm] (reference, unused)
 p.gear_ratio    = 3.82;   % final-drive ratio [-]
 p.rpm_motor_max = 4500;   % controller over-speed limit [rpm]
 p.drive         = 'RWD';  % single motor, rear-wheel drive
-p.eta_dt        = 0.88;   % driveline eff. battery->ground [-] PROVISIONAL
+p.eta_dt        = 0.88;   % driveline eff. battery->ground [-] PROVISIONAL - force-path lump
+p.eta_chain     = 0.97;   % chain + sprocket mechanical [-] PROVISIONAL
+p.eta_inv       = 0.95;   % inverter electrical [-] PROVISIONAL
+                          % energy accounting uses eta_chain*eta_inv*motor_eff(map);
+                          % eta_dt remains the thrust-delivery lump in gg_envelope.
 p.Crr           = 0.014;  % rolling resistance [-] (TTC LC0 free-rolling FX)
 p.k_trac        = 0.90;   % launch traction utilization [-] PROVISIONAL
 p.DI = 0.75;               % dynamic index k^2/(a*b) [-] PROVISIONAL
@@ -74,7 +78,8 @@ p.scenario.pack_usable_f  = 0.90;   % usable fraction of nominal pack energy (BM
 p.scenario.margin         = 0.90;   % design margin on usable energy (heat/driver/cones) [-] CHOICE
 
 % --- Model selection ---
-p.grip_model = 'axle';
+p.grip_model = 'axle';      % lateral limit: 'axle' (load-sensitive) | 'pointmass'
+p.long_model = 'combined';  % longitudinal: 'combined' (per-axle ellipse) | 'axle' | 'pointmass'
 
 % ======================= LOADED (generated artifact) =====================
 if bootstrap

@@ -71,11 +71,20 @@ end
 
 function [t, v] = accel_event(p, dist)
 % Standing-start time by forward integration in fixed velocity steps.
+% Launch uses ax_limit (p.long_model): the loaded rear tire is priced by
+% mu_of_load, not constant mu - slightly slower and honest.
 v = 0; x = 0; t = 0;
 dv = 0.005;                                    % [m/s]
+axf = [];                                      % coarse LUT: ax_limit is a solver
+vg  = linspace(0, p.v_max, 60);
+axf = arrayfun(@(vv) ax_limit(p, vv, 'accel'), vg);
 while x < dist
-    GG = gg_envelope(p, v);
-    a  = GG.ax_accel * p.g;
+    if v >= p.v_max                            % rev limiter: coast at v_max
+        t = t + (dist - x) / p.v_max;
+        v = p.v_max;
+        break;
+    end
+    a = interp1(vg, axf, min(max(v,0), p.v_max)) * p.g;
     if a <= 0, break; end                      % drag/power ceiling
     dt = dv / a;
     x  = x + v*dt + 0.5*a*dt^2;

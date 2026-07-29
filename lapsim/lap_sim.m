@@ -14,31 +14,53 @@ kappa = kappa(:);
 n = numel(s);  
 ds = diff(s);
 
-% Build the ay_limit lookup once (local ay_lut below); ceiling + ellipse share it.
-ayf  = ay_lut(p);
+% Build the edge lookups once (local vlut below). Lateral feeds the ceiling and
+% the lateral-usage fraction; longitudinal comes either from the per-axle
+% combined model (2D lookup in speed x lateral usage - the ellipse lives INSIDE
+% ax_combined, per axle) or from the scalar edges + car-level ellipse.
+ayf  = vlut(p, @(vv) ay_limit(p, vv));
+comb = isfield(p, 'long_model') && strcmpi(p.long_model, 'combined');
+if comb
+    vg = linspace(0, p.v_max, 24);
+    rg = linspace(0, 1, 13);                        % lateral usage fraction ay/ay_max
+    [VV, RR] = ndgrid(vg, rg);
+    Aacc = arrayfun(@(vv, rr) ax_combined(p, vv, rr*ayf(vv), 'accel'), VV, RR);
+    Abrk = arrayfun(@(vv, rr) ax_combined(p, vv, rr*ayf(vv), 'brake'), VV, RR);
+    Fa = griddedInterpolant({vg, rg}, Aacc, 'linear');
+    Fb = griddedInterpolant({vg, rg}, Abrk, 'linear');
+else
+    axaf = vlut(p, @(vv) ax_limit(p, vv, 'accel'));
+    axbf = vlut(p, @(vv) ax_limit(p, vv, 'brake'));
+end
 vlim = arrayfun(@(k) corner_speed(p, k, ayf), kappa);   % per-point speed ceiling
 v = vlim;
 if ~isempty(v0), v(1) = v0; end
 
 n_d = ellipse_exp(p, 'drive');   % friction-ellipse exponent, accel (measured)
-n_b = ellipse_exp(p, 'brake');   % ... braking
+n_b = ellipse_exp(p, 'brake');   % ... braking (scalar path only; combined has its own)
 
 niter = 3;  if ~closed, niter = 1; end
 for it = 1:niter
     for i = 1:n-1                                   % forward / accelerate
-        G     = gg_envelope(p, v(i));               % longitudinal edges (point mass)
-        aymax = ayf(v(i));                          % lateral edge (p.grip_model), via LUT
+        aymax = ayf(v(i));                          % lateral edge (p.grip_model)
         used = min(v(i)^2*kappa(i) / max(aymax*p.g, 1e-6), 1.0);
-        frac = (max(0, 1 - used^n_d))^(1/n_d);      % friction ellipse, exponent n_d
-        ax  = G.ax_accel * p.g * frac;
+        if comb
+            ax = Fa(min(max(v(i),0),p.v_max), used) * p.g;   % per-axle combined
+        else
+            frac = (max(0, 1 - used^n_d))^(1/n_d);  % car-level ellipse
+            ax  = axaf(v(i)) * p.g * frac;
+        end
         v(i+1) = min(vlim(i+1), sqrt(max(v(i)^2 + 2*ax*ds(i), 0))); % min between vlim and accel velocity based on curvature only
     end
     for i = n:-1:2                                  % backward / brake
-        G     = gg_envelope(p, v(i));               % longitudinal edges (point mass)
-        aymax = ayf(v(i));                          % lateral edge (p.grip_model), via LUT
+        aymax = ayf(v(i));                          % lateral edge (p.grip_model)
         used = min(v(i)^2*kappa(i) / max(aymax*p.g, 1e-6), 1.0);
-        frac = (max(0, 1 - used^n_b))^(1/n_b);      % friction ellipse, exponent n_b
-        ax  = G.ax_brake * p.g * frac;
+        if comb
+            ax = Fb(min(max(v(i),0),p.v_max), used) * p.g;   % per-axle combined
+        else
+            frac = (max(0, 1 - used^n_b))^(1/n_b);  % car-level ellipse
+            ax  = axbf(v(i)) * p.g * frac;
+        end
         v(i-1) = min(v(i-1), sqrt(v(i)^2 + 2*ax*ds(i-1))); % minimum between accel pass velocity and braking velocity based on curvature only
     end
     if closed, v(1) = v(end); elseif ~isempty(v0), v(1) = v0; end
@@ -65,16 +87,17 @@ else
 end
 end
 
-function ayfun = ay_lut(p, npts)
-% Precomputed ay_limit(p,v) lookup handle; build once per lap, interpolate.
-% ay(v) is smooth/monotone (downforce only), so 120 pts is exact to ~1e-4 g.
-if nargin < 2 || isempty(npts), npts = 120; end
+function h = vlut(p, fh, npts)
+% Tabulate a smooth function of speed once, return a fast interpolant handle.
+% The edge models are bisections/fixed-points; calling them per point per pass
+% would be ~100x slower for ~1e-4 g of difference.
+if nargin < 3 || isempty(npts), npts = 120; end
 vmax = p.v_max;
 vg = linspace(0, vmax, npts);
-ag = arrayfun(@(v) ay_limit(p, v), vg);     % the only axle_grip calls per lap
+vals = arrayfun(fh, vg);
 % pchip = shape-preserving (monotone data stays monotone, no overshoot).
-F = griddedInterpolant(vg, ag, 'pchip');
-ayfun = @(v) F(min(max(v, 0), vmax));
+F = griddedInterpolant(vg, vals, 'pchip');
+h = @(v) F(min(max(v, 0), vmax));
 end
 
 function E = lap_energy(p, v, s)
@@ -94,6 +117,16 @@ F_thrust = p.k_rot*p.m .* a + F_drag + F_rr + F_dl;   % [N], +drive / -brake
 
 J_PER_WH = 3600;
 E.drive_wheel_Wh = sum(max(F_thrust, 0) .* ds) / J_PER_WH;
-E.drive_acc_Wh   = E.drive_wheel_Wh / p.eta_dt;        % drawn from accumulator
+if isfield(p, 'eta_chain') && isfield(p, 'eta_inv')
+    % Electrical draw through the digitized EMRAX map: per-segment motor state,
+    % eta = chain x inverter x motor_eff(rpm, T). Replaces the flat eta_dt lump
+    % for ENERGY only; the thrust force path is unchanged.
+    rpm   = vm ./ p.Re .* p.gear_ratio .* (60/(2*pi));
+    T_mot = max(F_thrust, 0) .* p.Re ./ (p.gear_ratio * p.eta_chain);
+    eta_e = p.eta_chain .* p.eta_inv .* motor_eff(rpm, T_mot);
+    E.drive_acc_Wh = sum(max(F_thrust, 0) .* ds ./ max(eta_e, 0.5)) / J_PER_WH;
+else
+    E.drive_acc_Wh = E.drive_wheel_Wh / p.eta_dt;      % legacy flat lump
+end
 E.brake_wheel_Wh = sum(max(-F_thrust, 0) .* ds) / J_PER_WH;  % regen upper bound
 end

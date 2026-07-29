@@ -95,6 +95,7 @@ gg0 = gg_envelope(p, 0);
 G12 = axle_grip(p, 12);
 g12  = gg_envelope(p, 12);
 p_pm = p;  p_pm.grip_model = 'pointmass';   % same car, point-mass lateral limit
+p_lm = p;  p_lm.long_model = 'pointmass';   % same car, point-mass longitudinal edges
 
 C = {
   'mu_y = raw * derate',       p.mu_y,            p.mu_y_raw * p.mu_derate
@@ -118,6 +119,9 @@ C = {
   'ay_limit pmass = gg.ay',    ay_limit(p_pm, 12), g12.ay
   'n_env_drive loaded (p=art)',p.n_env_drive,      T.n_env_drive
   'n_env_brake loaded (p=art)',p.n_env_brake,      T.n_env_brake
+  'long_model default combined', double(strcmp(p.long_model,'combined')), 1
+  'ax_limit pmass = gg accel', ax_limit(p_lm, 12, 'accel'), g12.ax_accel
+  'ax_limit pmass = gg brake', ax_limit(p_lm, 12, 'brake'), g12.ax_brake
 };
 
 fprintf('\n-- formula wiring --\n');
@@ -143,6 +147,13 @@ A = {
   'axle limit < point mass',   double(ay_limit(p,12) < ay_limit(p_pm,12)), 1, 0.5
   'ellipse exp drive not n=2', inr(p.n_env_drive, 1.5, 1.98), 1, 0.5
   'ellipse exp brake not n=2', inr(p.n_env_brake, 1.5, 1.98), 1, 0.5
+  'ax accel axle < point mass',double(ax_limit(p,3,'accel') < ax_limit(p_lm,3,'accel')), 1, 0.5
+  'ax brake axle < point mass',double(ax_limit(p,12,'brake') < ax_limit(p_lm,12,'brake')), 1, 0.5
+  'combined(ay=0) = axle accel',ax_combined(p,12,0,'accel'), ax_limit(p,12,'accel'), 2e-3
+  'combined(ay=0) = axle brake',ax_combined(p,12,0,'brake'), ax_limit(p,12,'brake'), 2e-3
+  'combined falls with ay',    double(ax_combined(p,12,0.8*G12.ay_lim_g,'accel') < ax_combined(p,12,0,'accel')), 1, 0.5
+  'motor map 96% island',      inr(motor_eff(2500,110), 0.945, 0.965), 1, 0.5
+  'motor map high-torque band',inr(motor_eff(2500,220), 0.925, 0.945), 1, 0.5
   % wiring / regression locks (tautological against the artifact, tight)
   'mu_of_load @edge cont.',    mu_of_load(p, p.Fz_fit_max), polyval(p.mu_coef, p.Fz_fit_max)*p.mu_derate, 1e-9
   'mu_of_load outer=artifact', mu_of_load(p, T.Fz_outer_limit_lbf), T.mu_outer_central, 1e-6
