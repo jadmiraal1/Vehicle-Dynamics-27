@@ -22,3 +22,17 @@ slprj/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Generated outputs - every file here is reproduced by the run_* scripts
+plots/
+
+# Design-decision documents, trackers, releases, reports - live on the team
+# drive / locally, not in git. The benchmarks CSV stays: run_aero_targets reads it.
+organization/*
+!organization/comp_benchmarks_2026.csv
+/*.xlsx
+/VD_toolchain_roadmap.md
+
+# Track source scans and previews (the digitized CSVs the code reads ARE tracked)
+tracks/*.png
+tracks/__pycache__/
