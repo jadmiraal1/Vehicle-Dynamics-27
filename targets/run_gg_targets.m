@@ -63,16 +63,100 @@ out.cfg        = cfg;
 
 try
     plot_gg(p);
-    fprintf('\nPlot written: gg_envelope.png\n\n');
+    fprintf('\nPlot written: gg_envelope.png\n');
 catch e
-    fprintf('\n[plot skipped: %s]\n\n', e.message);
+    fprintf('\n[plot skipped: %s]\n', e.message);
+end
+try
+    gg_surface(p);
+    fprintf('Plot written: gg_surface.png\n\n');
+catch e
+    fprintf('[g-g-V surface FAILED - full report follows]\n%s\n\n', getReport(e));
 end
 end
+
+
+function gg_surface(p)
+% 3D g-g-V envelope with aero (per-axle combined model). At each speed the
+% (ay, ax) boundary comes from ay_limit + ax_combined - the bottle IS the
+% constraint surface the lap sim runs on. Accel side faces the viewer.
+% Solid = the CURRENT car (measured ClA); wireframe = the TR27 TARGET package
+% (p.scenario.ClA_target) - the envelope the car being designed will face.
+[LAT,  LON,  VV,  idx] = gg_shell(p);
+pt = p;  pt.ClA = p.scenario.ClA_target;  pt.CdA = p.scenario.CdA_target;
+[LATt, LONt, VVt] = gg_shell(pt);
+
+% Silent tripwire: fold each nose about its ay = 0 apex (lat antisymmetric,
+% long symmetric). Nonzero residual = real data asymmetry; only then speak up.
+fold = @(M, sgn) max(max(abs(M + sgn*fliplr(M))));
+res  = max([ fold(LAT(:,idx.accel), +1), fold(LON(:,idx.accel), -1), ...
+             fold(LAT(:,idx.brake), +1), fold(LON(:,idx.brake), -1) ]);
+if res > 1e-6
+    warning('run_gg_targets:ggvAsymmetry', ...
+        'g-g-V mirror residual %.3e m/s^2 - the shell DATA is asymmetric; inspect gg_shell.', res);
+end
+
+f  = figure('Visible','on','Position',[60 60 900 720],'Color','w');   % on-screen for inspection
+ax = axes(f);
+hs = surf(ax, LAT, LON, VV, VV, 'FaceAlpha', 1, ...
+     'EdgeColor', [0.15 0.15 0.15], 'EdgeAlpha', 0.22, 'LineWidth', 0.3);
+hold(ax,'on');
+for i = 1:3:size(LAT,1)                          % bolder speed rings
+    plot3(ax, LAT(i,:), LON(i,:), VV(i,:), 'k-', 'LineWidth', 0.6);
+end
+ht = mesh(ax, LATt, LONt, VVt, 'FaceAlpha', 0, ...
+     'EdgeColor', [0.75 0.15 0.15], 'EdgeAlpha', 0.45, 'LineWidth', 0.4);
+legend(ax, [hs ht], {sprintf('current car (ClA %.2f, measured)', p.ClA), ...
+        sprintf('TR27 target package (ClA %.1f)', p.scenario.ClA_target)}, ...
+       'Location','northeast', 'FontSize', 8, 'AutoUpdate','off');
+colormap(ax, parula);
+cb = colorbar(ax); cb.Label.String = 'speed [m/s]';
+xlabel(ax,'lat acc [m/s^2]'); ylabel(ax,'long acc [m/s^2]'); zlabel(ax,'speed [m/s]');
+title(ax, 'g-g-V envelope with aero (per-axle combined model)');
+xl = max(abs([LAT(:); LATt(:)])) * 1.08;
+xlim(ax, [-xl xl]);                              % centered about lat = 0
+xticks(ax, -20:5:20);  yticks(ax, -25:5:10);     % unambiguous, fixed ticks
+daspect(ax, [1 1 0.6]);                          % equal lat/long scale; speed scaled to shape
+zlim(ax, [0 p.v_max*1.03]);                      % grounded: base sits on the floor
+view(ax, 145, 20); grid(ax,'on');                % accel side toward the viewer
+rotate3d(f, 'on');
+outdir = fullfile(vd_root(), 'plots');
+if ~exist(outdir, 'dir'), mkdir(outdir); end
+saveas(f, fullfile(outdir, 'gg_surface.png'));   % figure stays open - rotate/inspect, close manually
+end
+
+
+function [LAT, LON, VV, idx] = gg_shell(p)
+% Build the closed (lat, long) boundary loop at each speed for the g-g-V surface.
+% Loop order: accel nose left -> centre -> right, then brake nose right -> centre
+% -> left. r = 0 (the ay = 0 apex) sits on BOTH noses, so max accel and max brake
+% are both ON the surface; the lat = +-1 nodes are duplicated on purpose - they
+% are the vertical edges where the accel and brake sides meet.
+vg = linspace(0, p.v_max, 18);       % from standstill: the base ring IS the static g-g
+nr = 13;  r = linspace(0, 1, nr);
+ncol = 4*nr - 2;
+LAT = zeros(numel(vg), ncol+1);  LON = LAT;  VV = LAT;
+for i = 1:numel(vg)
+    ayl = ay_limit(p, vg(i));
+    axa = arrayfun(@(rr) ax_combined(p, vg(i), rr*ayl, 'accel'), r);
+    axb = arrayfun(@(rr) ax_combined(p, vg(i), rr*ayl, 'brake'), r);
+    ay_loop = [-fliplr(r),   r(2:end),   fliplr(r),    -r(2:end)] * ayl * p.g;
+    ax_loop = [ fliplr(axa), axa(2:end), -fliplr(axb), -axb(2:end)] * p.g;
+    LAT(i,:) = [ay_loop, ay_loop(1)];
+    LON(i,:) = [ax_loop, ax_loop(1)];
+    VV(i,:)  = vg(i);
+end
+% Column bookkeeping for the symmetry check and the lat = 0 centrelines.
+idx = struct('accel', 1:2*nr-1, 'brake', 2*nr:ncol, ...
+             'apex_accel', nr, 'apex_brake', 3*nr-1);
+end
+
 
 function [t, v] = accel_event(p, dist)
 % Standing-start time by forward integration in fixed velocity steps.
 % Launch uses ax_limit (p.long_model): the loaded rear tire is priced by
 % mu_of_load, not constant mu - slightly slower and honest.
+%#ok<*DEFNU>
 v = 0; x = 0; t = 0;
 dv = 0.005;                                    % [m/s]
 axf = [];                                      % coarse LUT: ax_limit is a solver

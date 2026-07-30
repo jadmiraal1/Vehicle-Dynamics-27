@@ -11,9 +11,11 @@ tracks = {'track_endurance.csv', 'track_autocross.csv'};
 here   = vd_root();
 
 % Issued freeze recommendation (tracker #41). The band is the decision; the sweep
-% below is the evidence. Re-derive if the motor curve, aero package, or layout change.
-BAND_OK   = [3.1 4.0];     % acceptable: < ~0.1 s/lap penalty
-BAND_PREF = [3.3 3.5];     % preferred: brackets the cross-tier optima, robust side
+% below is the evidence. Chosen by minimax across {current, target-aero} x
+% {combined, motor-limited} model states - the freeze must serve the car being
+% DESIGNED (target aero), with downside cover if aero or grip underdeliver.
+BAND_OK   = [3.3 4.0];     % acceptable across all states
+BAND_PREF = [3.45 3.7];    % preferred: four-state minimax neighborhood
 RPM_ALT   = [4200 4880];   % rev-ceiling bracket around p.rpm_motor_max (low / full-charge est.)
 
 nG = numel(GR);
@@ -31,27 +33,35 @@ for i = 1:nG
     t_acc(i) = accel_time(p2, 75);
 end
 
-% Robustness: endurance lap at the alternate rev ceilings (coarser grid; the
-% nominal-ceiling curve is the main sweep's endurance column).
+% Robustness: endurance lap at the alternate rev ceilings AND at the TR27
+% target aero package (coarser grid; nominal curve = the main sweep's column).
 ir  = 1:2:nG;
 GRr = GR(ir);
 [se, ke] = load_track(fullfile(here, 'tracks', tracks{1}));
-t_rob = nan(numel(GRr), numel(RPM_ALT));
+t_rob  = nan(numel(GRr), numel(RPM_ALT));
+t_aero = nan(numel(GRr), 1);
 for i = 1:numel(GRr)
     for j = 1:numel(RPM_ALT)
         p2 = set_gear(p, GRr(i), RPM_ALT(j));
         [~, t_rob(i,j)] = lap_sim(p2, se, ke, [], true);
     end
+    p2 = set_gear(p, GRr(i), p.rpm_motor_max);
+    p2.ClA = p.scenario.ClA_target;  p2.CdA = p.scenario.CdA_target;
+    [~, t_aero(i)] = lap_sim(p2, se, ke, [], true);
 end
 
-% Optima per event and robustness spread inside the acceptable band
+% Optima per event and worst-case penalty across states inside the band.
+% Each state column is penalized against its OWN optimum (levels differ by
+% seconds between aero states; only within-state penalties are comparable).
 [~, ie] = min(t_lap(:,1));  gr_e = GR(ie);
 [~, ia] = min(t_lap(:,2));  gr_a = GR(ia);
 [~, ic] = min(t_acc);       gr_c = GR(ic);
 [~, icur] = min(abs(GR - p.gear_ratio));
 inband = GRr >= BAND_OK(1) & GRr <= BAND_OK(2);
-allc   = [t_lap(ir,1) t_rob];                        % 3 ceilings, coarse grid
-spread = max(max(allc(inband,:),[],2) - min(allc(inband,:),[],2));
+cols   = [t_lap(ir,1) t_rob t_aero];
+pen    = cols - min(cols, [], 1);
+wc     = max(pen, [], 2);                            % worst-case penalty per gear
+spread = max(wc(inband));
 
 fprintf('\nFINAL-DRIVE RATIO STUDY  (#41; lap sim, voltage-limited rev cap)\n');
 fprintf('Rev limit %.0f rpm (voltage-governed at this pack); motor %.0f Nm peak / %.1f kW.\n', ...
@@ -67,10 +77,10 @@ fprintf('\nLap-optimal ratio:  endurance %.2f:1 | autocross %.2f:1 | 75 m accel 
         gr_e, gr_a, gr_c);
 fprintf('Current %.2f:1 costs %+.2f s endurance, %+.2f s autocross vs each optimum.\n', ...
         p.gear_ratio, t_lap(icur,1)-t_lap(ie,1), t_lap(icur,2)-t_lap(ia,2));
-fprintf('Robustness: across rev ceilings %.0f/%.0f/%.0f rpm, max lap-time spread inside\n', ...
+fprintf('Robustness: across rev ceilings (%.0f/%.0f/%.0f rpm) AND the target-aero state\n', ...
         RPM_ALT(1), p.rpm_motor_max, RPM_ALT(2));
-fprintf('        the %.1f-%.1f band is %.3f s -> the ceiling uncertainty cannot move the choice.\n', ...
-        BAND_OK(1), BAND_OK(2), spread);
+fprintf('        (ClA %.1f), worst-case penalty inside the %.1f-%.1f band is %.3f s.\n', ...
+        p.scenario.ClA_target, BAND_OK(1), BAND_OK(2), spread);
 fprintf('Issued freeze (tracker #41): %.1f-%.1f preferred; %.1f-%.1f acceptable. Snap to\n', ...
         BAND_PREF(1), BAND_PREF(2), BAND_OK(1), BAND_OK(2));
 fprintf('        buildable sprockets; packaging chooses within the band.\n');
@@ -136,7 +146,7 @@ f = figure('Visible','off','Position',[80 80 900 560],'Color','w');
 ax = axes(f); hold(ax,'on'); grid(ax,'on');
 yl = [0 1.05];
 patch(ax, bok([1 2 2 1]),   yl([1 1 2 2]), [0.94 0.92 0.85], 'EdgeColor','none', ...
-      'DisplayName', sprintf('acceptable %.1f-%.1f (<0.1 s)', bok(1), bok(2)));
+      'DisplayName', sprintf('acceptable band %.1f-%.1f', bok(1), bok(2)));
 patch(ax, bpref([1 2 2 1]), yl([1 1 2 2]), [0.89 0.85 0.74], 'EdgeColor','none', ...
       'DisplayName', sprintf('preferred %.1f-%.1f', bpref(1), bpref(2)));
 plot(ax, GR, t_lap(:,1)-min(t_lap(:,1)), '-o','MarkerSize',3.5,'LineWidth',1.8, ...

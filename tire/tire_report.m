@@ -305,7 +305,53 @@ sgtitle('Anisotropy shape correction — 18in LC0 peak back-derived from its 6de
         'FontWeight', 'bold');
 save_fig(f, fullfile(outdir, 'tire_anisotropy_shape.png'));
 
-fprintf('tire_report: 9 figures written to plots/\n');
+% Fig 10: vertical stiffness + loaded radius (design tire, RL channel).
+% Source of tracker #67: k_t from the Fz-vs-RL slope; loaded radii at the
+% static per-tire loads from vehicle_params (so they track the car).
+Dr = load_rl(fullfile(vd_root(), 'TTC_Data'), [p.tire_data_prefix '_*.mat']);
+Fz10  = -Dr.FZ;
+keep  = abs(Dr.SA) < 1 & abs(Dr.IA) < 1.5 & Dr.P > 9 & Dr.P < 13 & Fz10 > 100 ...
+        & abs(Dr.FX ./ max(abs(Dr.FZ), 1)) < 0.1;
+Fz10 = Fz10(keep);  RL10 = Dr.RL(keep);
+c10  = polyfit(RL10, Fz10, 1);                     % Fz [lbf] vs RL [in]
+k_t  = -c10(1);                                    % [lbf/in]
+N_PER_LBF = 4.44822;
+Fzq  = [p.Wf_static/2, p.m*p.g/4, p.Wr_static/2] / N_PER_LBF;   % front / design / rear [lbf]
+RLq  = (Fzq - c10(2)) / c10(1);
+f = new_fig([90 90 900 620]);
+ax = axes(f); hold(ax, 'on'); style(ax);
+scatter(ax, Fz10(1:25:end), RL10(1:25:end), 6, [0.7 0.7 0.7], 'filled', ...
+        'MarkerFaceAlpha', 0.4, 'HandleVisibility', 'off');
+Fline = linspace(min(Fz10), max(Fz10), 50);
+plot(ax, Fline, (Fline - c10(2))/c10(1), '-', 'Color', tire_c(1,:), 'LineWidth', 2, ...
+     'DisplayName', sprintf('linear fit: k_t = %.0f lbf/in (%.0f N/mm)', k_t, k_t*N_PER_LBF/25.4));
+mk = {'^','o','s'}; lb = {'front static','design load','rear static'};
+for q = 1:3
+    plot(ax, Fzq(q), RLq(q), mk{q}, 'MarkerSize', 9, 'MarkerFaceColor', [0.84 0.37 0], ...
+         'Color', [0.84 0.37 0], 'DisplayName', ...
+         sprintf('%s: %.0f lbf -> %.2f in (%.4f m)', lb{q}, Fzq(q), RLq(q), RLq(q)*0.0254));
+end
+yline(ax, 8.0, ':', 'unloaded 8.00 in', 'Color', [0.5 0.5 0.5], 'HandleVisibility','off');
+xlabel(ax, 'vertical load F_Z  [lbf]'); ylabel(ax, 'loaded radius RL  [in]');
+legend(ax, 'Location', 'northeast', 'FontSize', 8);
+title(ax, sprintf('%s vertical stiffness and loaded radius (10 psi, low slip/camber)', ...
+      strrep(p.tire_data_prefix,'_','\_')));
+save_fig(f, fullfile(outdir, 'tire_radius.png'));
+
+fprintf('tire_report: 10 figures written to plots/\n');
+end
+
+function D = load_rl(data_dir, pattern)
+% Channels for the radius figure only (RL is absent from the other loaders).
+channels = {'SA','FX','FZ','IA','P','RL'};
+files = dir(fullfile(data_dir, pattern));
+chunks = cell(numel(files), numel(channels));
+for i = 1:numel(files)
+    if contains(files(i).name, 'raw'), continue; end
+    S = load(fullfile(data_dir, files(i).name));
+    for c = 1:numel(channels), chunks{i,c} = S.(channels{c})(:); end
+end
+for c = 1:numel(channels), D.(channels{c}) = vertcat(chunks{:,c}); end
 end
 
 function D = load_cloud(data_dir)
