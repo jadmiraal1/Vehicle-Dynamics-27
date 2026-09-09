@@ -134,11 +134,13 @@ out.d_skidpad_s   = t_skid(ay_best) - t_skid(ay(1));
 out.Fz_outer_f_lbf = Fz_out_f;
 out.beyond_fit_box = max(Fz_out_f, Fz_out_r) > p.camber_Fz_max_lbf;
 
+if vd_plots()
 try
     make_plot(p, GAM, ay, ay_f, ay_r);
     fprintf('Plot written: camber_targets.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

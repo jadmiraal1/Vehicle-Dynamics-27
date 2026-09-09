@@ -63,7 +63,8 @@ case 'brake'
         if Wr <= 0                                   % rear lifted: front does it all
             cap = mu_of_load(p, (Wf+max(Wr,0))/2/N_PER_LBF) * (Wf + max(Wr,0));
         else
-            cap = mu_of_load(p, Wf/2/N_PER_LBF)*Wf + mu_of_load(p, Wr/2/N_PER_LBF)*Wr;
+            mu2 = mu_of_load(p, [Wf Wr]/2/N_PER_LBF);   % both axles, one call
+            cap = mu2(1)*Wf + mu2(2)*Wr;
         end
         cap = cap * p.mu_anisotropy;                 % lateral fit -> longitudinal
         if (cap + F_loss) / m_eff >= D, lo = D; else, hi = D; end

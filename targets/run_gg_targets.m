@@ -67,17 +67,21 @@ out.gg_hi      = gg_hi;
 out.dtdm_accel = dt_per_kg;
 out.cfg        = cfg;
 
+if vd_plots()
 try
     plot_gg(p);
     fprintf('\nPlot written: gg_envelope.png\n');
 catch e
     fprintf('\n[plot skipped: %s]\n', e.message);
 end
+end
+if vd_plots()
 try
     gg_surface(p);
     fprintf('Plot written: gg_surface.png\n\n');
 catch e
     fprintf('[g-g-V surface FAILED - full report follows]\n%s\n\n', getReport(e));
+end
 end
 end
 

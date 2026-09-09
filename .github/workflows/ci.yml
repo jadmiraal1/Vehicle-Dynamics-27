@@ -1,0 +1,79 @@
+name: CI
+
+# Every push and every pull request. Pushing a branch is enough to get a full
+# answer back, which matters when the person (or the tool) proposing the change
+# cannot run MATLAB locally - CI is then the only test runner there is.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ------------------------------------------------------------------------
+  # Seconds, no MATLAB, no tire data. Runs first and fails fast, so an obvious
+  # drift never waits behind a five-minute MATLAB install.
+  # ------------------------------------------------------------------------
+  checks:
+    name: consistency (no MATLAB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # ci_staleness diffs against the base commit
+
+      - name: Repo consistency
+        run: python3 tests/ci_checks.py
+
+      - name: Artifact staleness bookkeeping
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 tests/ci_staleness.py
+
+  # ------------------------------------------------------------------------
+  # The model itself. This repo is PUBLIC, so setup-matlab licenses every
+  # product for free on GitHub-hosted runners - no license server, no batch
+  # token, no self-hosted runner. On a private repo none of that is true.
+  #
+  # Optimization Toolbox is installed on purpose: without it fit_mf silently
+  # falls back to fminsearch and the tire numbers move (Ca ~32% low). CI must
+  # take the same code path a developer does, or it is testing a different
+  # program. See the README Requirements section.
+  # ------------------------------------------------------------------------
+  matlab:
+    name: MATLAB models
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          products: Optimization_Toolbox
+          cache: true
+
+      # TTC_Data/ is licensed and gitignored, so this runner has no tire data.
+      # vd_selftest detects that, skips the staleness gate with a loud line, and
+      # runs everything downstream of the tire artifact - which IS tracked.
+      - name: Self-test (wiring)
+        uses: matlab-actions/run-command@v3
+        with:
+          command: vd_setup; vd_selftest;
+
+      # Blunter: runs every target and diffs every number against the committed
+      # baseline. On failure the log lists exactly which values moved and by how
+      # much, which is the thing you actually want to read.
+      - name: Golden values (regression)
+        uses: matlab-actions/run-command@v3
+        with:
+          command: vd_setup; vd_golden;
+
+      # Keep the generated figures from the run. Cheap, and it means a failing
+      # number can be looked at rather than only read about.
+      - name: Upload plots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plots
+          path: plots/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,6 @@
+# tracks/digitize_track.py only. The MATLAB toolchain needs none of this.
+# Install with:  python -m pip install -r tracks/requirements.txt
+numpy
+Pillow
+scikit-image
+scipy

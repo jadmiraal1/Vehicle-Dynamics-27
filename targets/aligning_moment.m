@@ -118,18 +118,22 @@ fprintf('        %.0f-%.0f N*m/front tire peak. Both are below peak pneumatic tr
 fprintf('        so mechanical trail complements - does not overpower - the tire''s own (FSAE\n');
 fprintf('        guidance, no power steering). Finalize against the steering effort budget.\n');
 
+if vd_plots()
 try
     caster_plot(alc, Fyc, tpc, [0 rmm(1) rmm(2)], N_PER_LBF, here);
     fprintf('  Plot written: plots/caster_target.png\n');
 catch ce
     fprintf('  [caster plot skipped: %s]\n', ce.message);
 end
+end
 
+if vd_plots()
 try
     make_plot(p, D, base, loads, out, Fz_fo_lbf, edge);
     fprintf('  Plot written: plots/aligning_moment.png\n');
 catch e
     fprintf('  [plot skipped: %s]\n', e.message);
+end
 end
 end
 

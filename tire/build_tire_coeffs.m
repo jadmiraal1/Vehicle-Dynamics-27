@@ -1,6 +1,6 @@
 function T = build_tire_coeffs()
 % BUILD_TIRE_COEFFS  Fit the tires and promote the design tire's grip into
-% tire_coeffs.mat - the artifact vehicle_params loads, hash-stamped so vd_selftest
+% tire_coeffs_<CAR>.mat - the artifact vehicle_params loads, hash-stamped so vd_selftest
 % catches staleness. Re-run after tire-fit/TTC changes, then re-issue grip targets.
 
 here = fileparts(mfilename('fullpath'));

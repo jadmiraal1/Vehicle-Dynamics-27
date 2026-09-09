@@ -85,6 +85,7 @@ end
 
 function save_lap_map(here, name, x, y, v, t_lap)
 % Speed-colored track map: visual check that the right course loaded.
+if ~vd_plots(), return; end
 try
     outdir = fullfile(here, 'plots');
     if ~exist(outdir, 'dir'), mkdir(outdir); end

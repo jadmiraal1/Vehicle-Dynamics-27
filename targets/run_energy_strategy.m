@@ -96,12 +96,14 @@ out = struct('P_caps_kW', P_CAPS_KW, 'E_noregen_kWh', E_nr, 'E_regen_kWh', E_rg,
              't_lap', t_lap, 'cap_regen_kW', cap_rg, 'cap_noregen_kW', cap_nr, ...
              'usable_kWh', usable);
 
+if vd_plots()
 try
     make_plot(P_CAPS_KW, E_nr, E_rg, t_lap, usable, MARGIN, ...
               REGEN_CAPTURE, REGEN_RT, here);
     fprintf('Plot written: plots/energy_strategy.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

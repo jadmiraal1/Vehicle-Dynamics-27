@@ -55,7 +55,7 @@ for i = 1:n
 end
 
 fprintf('\nT-WDIST target : %.0f-%.0f%% front (PROVISIONAL)\n', 100*rec_lo, 100*(rec_lo+0.03));
-fprintf('  Basis: grip is flat vs split (%.1f%% over the sweep) so weight\n', ...
+fprintf('  Caveat / basis: grip is flat vs split (%.1f%% over the sweep) so weight\n', ...
         100*(max(ay)/min(ay)-1));
 fprintf('  distribution is a traction vs transient-stability call, not a grip\n');
 fprintf('  one. Steady-state models favour rearward monotonically (accel +%.0f%%\n', ...
@@ -75,11 +75,13 @@ out = struct('chi', CHI_SWEEP, 'ay', ay, 'accel', accel, 'brake', brake, ...
              'target_front', [rec_lo rec_lo+0.03], 'chi_floor_conv', CHI_FLOOR_CONV, ...
              'current', p.mass_dist_f);
 
+if vd_plots()
 try
     make_plot(p, CHI_SWEEP, ay, accel, brake, lltd_neu, CHI_FLOOR_CONV, LLTD_RANGE);
     fprintf('Plot written: plots/wdist_targets.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

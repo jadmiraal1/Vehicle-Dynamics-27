@@ -49,7 +49,7 @@ fprintf('Caveat: static axle loads, linear tires (valid to ~0.4 g), no load\n');
 fprintf('        transfer or roll stiffness (mid-tier moves K). lambda_Ca=%.2f prov.\n', ...
         p.lambda_Ca);
 
-out.Ca_coef_source = 1;   % 1 = from tire_coeffs.mat artifact (not a live fit)
+out.Ca_coef_source = 1;   % 1 = from the tire_coeffs_<CAR>.mat artifact (not a live fit)
 out.Ca_axle_f   = Ca_axle_f;
 out.Ca_axle_r   = Ca_axle_r;
 out.K_deg_per_g = B.K_deg;
@@ -57,11 +57,13 @@ out.yaw_gain_15 = gain_15;
 out.tau_vmax    = B.tau_slow(end);
 out.Izz         = p.Izz;
 
+if vd_plots()
 try
     make_plot(p, B);
     fprintf('Plot written: handling_response.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

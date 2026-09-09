@@ -94,11 +94,13 @@ out = struct('t_skid_mid', t_skid_mid, 't_skid_pm', t_skid_pm, ...
              'cop_sweep', COP_SWEEP, 'ay_cop_high', ay_hi, 'cop_stable', stab, ...
              'G_skid', G);
 
+if vd_plots()
 try
     make_plot(p, out, SKID_REAL_BEST, V_LOW, V_HIGH, CLA_TARGET);
     fprintf('Plot written: plots/balance_targets.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

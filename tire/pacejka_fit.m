@@ -4,7 +4,7 @@ function R = pacejka_fit()
 % from the 18in LC0 held-SA sweeps. Theory: ref doc sec 8.
 
 % THIS IS now THE SOURCE OF design GRIP (Jul 2026). Promoted into the car by
-% build_tire_coeffs -> tire_coeffs.mat -> vehicle_params. Do not hand-copy
+% build_tire_coeffs -> tire_coeffs_<CAR>.mat -> vehicle_params. Do not hand-copy
 % anything out of this function's printout into vehicle_params.
 
 p = vehicle_params('bootstrap');   % car mass only; must not require the
@@ -17,6 +17,7 @@ LOAD_BAND     = 0.15;                 % +/-15% of data is accepted around each b
 SA_EDGES      = 0.25:0.5:12.25;      % |slip angle| bins [deg], discretizes the 'continuous' slip angle data into bins to deal with noisy raw data
 MIN_BIN_N     = 40;                  % each slip angle bin req 40 samples to be trustworthy
 MIN_TREND_PTS = 3;                   % min valid load bins needed for mu/Ca vs load trend fits
+V_MIN_MPH     = 20;                  % ROLLING ONLY - see the note on the mask below
 
 here     = vd_root();
 data_dir = fullfile(here, 'TTC_Data');
@@ -24,7 +25,7 @@ N_PER_LBF        = 4.44822; % conversion rates
 LBF_DEG_TO_N_RAD = N_PER_LBF * 180/pi;
 Fz_design        = p.m * p.g / 4 / N_PER_LBF;   % design corner load [lbf], just assumes mean
 
-fprintf('\nPACEJKA PURE-LATERAL FIT  (IA<1.5deg, P 9-13 psi)\n');
+fprintf('\nPACEJKA PURE-LATERAL FIT  (IA<1.5deg, P 9-13 psi, V>%d mph)\n', V_MIN_MPH);
 fprintf('  + camber sensitivity from the TTC camber sweeps (tire/camber_fit.m)\n');
 
 % Loading and filtering raw data
@@ -33,21 +34,27 @@ for t = 1:numel(TIRES)
     D = load_channels(data_dir, [tire '_*.mat']);
     Fz_mag = -D.FZ;
 
-    % Pure lateral, near-zero camber, near-target pressure; drop the
+    % Pure lateral, near-zero camber, near-target pressure, ROLLING; drop the
+    % 5-7 deg slip band where the sweep reverses.
+    %
+    % THE ROLLING FILTER (added Sep 2026, and it moved every grip number).
+    % Each of the four candidate tires has a first TTC run that is ~99% below
+    % 5 mph - 52 to 55% of the samples this mask would otherwise keep. A tire
+    % that is not rolling has no steady-state cornering force to give: at 150
+    % lbf and 4 deg of slip the static samples read Fy/Fz ~ 0.22 where the
+    % rolling ones read ~1.93. Including them dragged the binned medians down
+    % and the design tire's peak mu with them, by 4.1% at the design load
+    % (2.383 -> 2.481).
+    %
+    % Note WHY this had to be removed rather than corrected for: the bias is
+    % not uniform. Fitting on medians makes it partly self-limiting, so the
+    % same 50%-static contamination moved LC0_16x75 by +4.1% and R20_16x75 by
+    % -0.0%. An unpredictable bias cannot be calibrated away, only excluded.
     base = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 30) & (abs(D.IA) < 1.5) ...
-           & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0);
+           & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0) ...
+           & (D.V > V_MIN_MPH);
 
-    % KNOWN ISSUE, deliberately not fixed in this change. The mask above does
-    % not filter on road speed, and some TTC runs contain near-static segments
-    % (for the design tire, file _1 is 99% below 5 mph and supplies roughly half
-    % the samples in three of the five load bins). A tire that is not rolling
-    % makes almost no lateral force, so those samples pull the binned medians
-    % down: the same fit restricted to V > 20 mph gives mu_y about 4% HIGHER at
-    % the design load (2.47 vs 2.38). Fixing it moves every issued grip target,
-    % so it belongs in its own change rather than folded into the camber work.
-    % camber_fit DOES apply the rolling filter, because camber thrust does not
-    % exist at all in a static contact patch.
-    report_static_fraction(tire, D, base);
+    report_rolling_filter(tire, D, base, V_MIN_MPH);
 
     n = numel(LOAD_BINS_LBF);
     T = struct('Fz_lbf', nan(1,n), 'B', nan(1,n), 'C', nan(1,n), ...
@@ -145,15 +152,15 @@ fprintf('Note: MF peak reads the median curve; ttc_fit 99th percentile reads the
 fprintf('upper envelope. Figures: run tire_report (presentation layer).\n');
 end
 
-function report_static_fraction(tire, D, base)
-% Say out loud how much of the zero-camber fit came from non-rolling samples.
+function report_rolling_filter(tire, D, base, v_min)
+% Provenance: say how much the rolling filter removed. If this ever prints 0%
+% for a tire that used to lose half its samples, the mask has been edited.
 if ~isfield(D, 'V') || isempty(D.V), return; end
-f = nnz(base & (D.V < 5)) / max(nnz(base), 1);
-if f > 0.05
-    fprintf(2, ['  ! %s: %.0f%% of the zero-camber samples are below 5 mph ' ...
-                '(non-rolling).\n    See the KNOWN ISSUE note in pacejka_fit.m ' ...
-                '- peak mu is biased low.\n'], tire, 100*f);
-end
+would = (abs(D.FX ./ D.FZ) < 0.10) & (-D.FZ > 30) & (abs(D.IA) < 1.5) ...
+        & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0);
+dropped = nnz(would) - nnz(base);
+fprintf('       rolling filter (V>%d mph): kept %d of %d samples (%.0f%% dropped as non-rolling)\n', ...
+        v_min, nnz(base), nnz(would), 100*dropped/max(nnz(would),1));
 end
 
 function y = mf(p, alpha)
@@ -212,7 +219,7 @@ function L = fit_longitudinal(data_dir)
 % FX vs slip ratio at SA~0, 18in LC0, ~250 lbf; drive and brake fitted
 % separately (the tire is measurably asymmetric). Also estimates the
 % friction-envelope exponent n from the held-SA combined sweeps.
-channels = {'SA','FX','FY','FZ','IA','V','N','RE'};
+channels = {'SA','FX','FY','FZ','IA','V','N','RE'};   % V: rolling filter + slip ratio
 files    = dir(fullfile(data_dir, 'LC0_18x60_*.mat'));
 chunks   = cell(numel(files), numel(channels));
 for i = 1:numel(files)
@@ -228,7 +235,12 @@ end
 Fz_mag = -D.FZ;
 omega  = D.N * 2*pi/60; % needs speeds because grip is a function of slip ratio not slip angle
 v_road = D.V * 0.44704;
-sel0   = (abs(D.SA) < 1.0) & (abs(D.IA) < 1.5) & (abs(Fz_mag - 250) < 35);
+% V > 20 mph is redundant for this tire today (LC0_18x60 has no near-static
+% samples at all) but it is not decorative: slip ratio divides by road speed,
+% so a future data set with a creep segment would produce infinities here
+% rather than a visible error.
+sel0   = (abs(D.SA) < 1.0) & (abs(D.IA) < 1.5) & (abs(Fz_mag - 250) < 35) ...
+         & (D.V > 20);
 
 % Frozen free-rolling effective radius, then slip ratio
 free = sel0 & (abs(D.FX)./Fz_mag < 0.02); % define wheel radius from free roll and use as reference to calculate slip ratios

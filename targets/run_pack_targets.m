@@ -176,11 +176,13 @@ out = struct('S_anchor', S_ANCHOR, 'S', S_GRID, 'caps_kW', CAPS_KW, ...
 
 outdir = fullfile(here, 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
+if vd_plots()
 try
     pack_plot(S_GRID, cap, pts, outdir);
     fprintf('Plot written: plots/pack_targets.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

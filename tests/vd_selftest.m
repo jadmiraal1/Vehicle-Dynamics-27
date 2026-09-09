@@ -7,6 +7,28 @@ fprintf('\n================= VD SELF-TEST =================\n');
 here  = fileparts(fileparts(mfilename('fullpath')));   % repo root (tests/ is below)
 nfail = 0;
 
+% No figure may appear, and none may be left open. This suite runs targets, and
+% targets draw. Interactively that used to leave one window behind; in CI a
+% suite that pops windows is a suite nobody can run in a loop.
+fig0 = get(0, 'DefaultFigureVisible');
+set(0, 'DefaultFigureVisible', 'off');
+restore_fig = onCleanup(@() set(0, 'DefaultFigureVisible', fig0));
+
+% And do not DRAW at all. Rendering and writing PNGs was most of the wall-clock
+% cost of this suite and none of it is what the suite checks. onCleanup so an
+% error mid-run cannot leave plotting off for the rest of the session.
+plots0 = vd_plots(false);
+restore_plots = onCleanup(@() vd_plots(plots0));
+t_start = tic;
+
+% Is the licensed TTC data present? It is gitignored - this repo is public and
+% the data is not redistributable - so a CI clone will not have it. Everything
+% downstream of the tire artifact still runs, because the artifact IS tracked.
+% Absent means ZERO .mat files: a PARTIAL data folder must still fail the hash
+% gate below rather than quietly downgrade to CI mode.
+n_ttc   = numel(dir(fullfile(here, 'TTC_Data', '*.mat')));
+has_ttc = n_ttc > 0;
+
 % ---------------------------------------------------------------- layer 0
 % The staleness gate. The generated-artifact pattern is only safe if something
 % screams when the artifact and its inputs diverge.
@@ -24,31 +46,45 @@ if isfield(T, 'car') && ~strcmp(T.car, car)
 end
 fprintf('%-32s %s\n', 'active car', car);
 
+if ~has_ttc
+    % Do NOT compare hashes here. tire_src_files globs TTC_Data/*.mat, so with
+    % no data the input list is a different list and the hash would differ for
+    % a reason that says nothing about staleness. Reporting a SKIP is honest;
+    % comparing anyway and failing would train everyone to ignore a red gate,
+    % and quietly passing would be worse still.
+    fprintf('%-32s %s\n', 'tire artifact fresh (hash)', 'SKIP - no TTC_Data');
+    fprintf(2, ['  ! TTC_Data/ is absent, so the staleness gate is NOT covered by ' ...
+                'this run.\n    Nothing here can tell you the artifact matches the ' ...
+                'fit code. Run the\n    full suite locally (data present) before ' ...
+                'trusting a tire change.\n']);
+end
 want = vd_hash(tire_src_files(here));
 if ~isfield(T, 'src_hash'), stored = '(none)'; else, stored = T.src_hash; end
-if ~strcmp(stored, want)
+if has_ttc && ~strcmp(stored, want)
     fprintf(2, ['\n*** Stale tire artifact ***\n' ...
-        'tire_coeffs.mat was built from different inputs than are on disk.\n' ...
+        'The tire artifact was built from different inputs than are on disk.\n' ...
         '  stored: %s\n  actual: %s\n' ...
         'The tire fit code, the promotion math, or the TTC data changed since\n' ...
         'the last build, so the car is running on grip that no longer matches.\n\n' ...
         'Run:  build_tire_coeffs\n' ...
         'Then re-issue the grip-derived targets (#8 #12 #13 #48 #49 #61-65)\n' ...
         'before handing any of them to another subteam.\n\n'], stored, want);
-    error('vd_selftest:staleArtifact', 'tire_coeffs.mat is stale.');
+    error('vd_selftest:staleArtifact', 'tire_coeffs_%s.mat is stale.', car);
 end
-fprintf('%-32s %s\n', 'tire_coeffs.mat fresh (hash)', 'PASS');
+if has_ttc
+    fprintf('%-32s %s\n', 'tire artifact fresh (hash)', 'PASS');
+end
 
 % The hash covers the fit code + TTC data, but not vehicle_params.m -- and
 p0 = vehicle_params();
 if ~isfield(T, 'Fz_design_lbf')
-    fprintf(2, 'tire_coeffs.mat predates the Fz_design check. Run build_tire_coeffs.\n');
+    fprintf(2, 'The tire artifact predates the Fz_design check. Run build_tire_coeffs.\n');
     error('vd_selftest:noFzDesign', 'artifact has no Fz_design_lbf.');
 end
 dFz = abs(p0.Fz_design_lbf - T.Fz_design_lbf);
 if dFz > 1e-6 * max(1, T.Fz_design_lbf)
     fprintf(2, ['\n*** Design load moved ***\n' ...
-        'The car mass changed since tire_coeffs.mat was built.\n' ...
+        'The car mass changed since the tire artifact was built.\n' ...
         '  artifact built at : %.2f lbf/corner\n' ...
         '  params now give   : %.2f lbf/corner  (m = %.2f kg)\n' ...
         'Tire mu is read at the design load and falls with load, so the stored\n' ...
@@ -95,7 +131,11 @@ for fld = {'n_env_drive','n_env_brake'}
 end
 
 evalc('out  = run_load_transfer_targets();');
-evalc('R    = ttc_fit();');
+if has_ttc
+    evalc('R = ttc_fit();');       % reads TTC_Data directly - the one fit that does
+else
+    R = [];
+end
 evalc('out2 = run_gg_targets();');
 evalc('H    = run_handling_targets();');
 gg0 = gg_envelope(p, 0);
@@ -169,11 +209,17 @@ end
 fprintf('\n-- data anchors --\n');
 % Two kinds of check here:
 inr = @(x,lo,hi) double(x >= lo & x <= hi);
-A = {
-  % (1) raw-data anchor - fit-method-independent
-  'ttc_fit LC0 pctile (data)', R.LC0_16x75.mu_y_raw, 2.602, 0.030
+A = {};
+if has_ttc
+    % (1) raw-data anchor - fit-method-independent. Needs the licensed data.
+    A = [A; {'ttc_fit LC0 pctile (data)', R.LC0_16x75.mu_y_raw, 2.602, 0.030}];
+end
+A = [A; {
   % (2) physical invariants
-  'mu_y_raw in [2.0,2.6]',     inr(p.mu_y_raw, 2.0, 2.6),        1, 0.5
+  % Upper bound raised from 2.6 to 2.7 in Sep 2026: the rolling-only fit moved
+  % the design tire from 2.383 to 2.481 and this band exists to catch a units
+  % slip, not to pin the value.
+  'mu_y_raw in [2.0,2.7]',     inr(p.mu_y_raw, 2.0, 2.7),        1, 0.5
   'anisotropy in [0.90,1.10]', inr(p.mu_anisotropy, 0.90, 1.10), 1, 0.5
   'axle ay in (0.85,1.0)*mu_y',inr(G12.ay_lim_g, 0.85*p.mu_y, p.mu_y), 1, 0.5
   'axle limit < point mass',   double(ay_limit(p,12) < ay_limit(p_pm,12)), 1, 0.5
@@ -201,7 +247,7 @@ A = {
   'camber clamped past box',   tire_camber(p, Fz_t, 3*p.camber_gamma_max_deg), tire_camber(p, Fz_t, p.camber_gamma_max_deg), 1e-12
   'axle_grip RESPONDS to camber', double(abs(G12c2.ay_lim_g - G12.ay_lim_g) > 1e-4), 1, 0.5
   'camber fit RMS < 8%',       double(max(T.camber_rms(1:2)) < 0.08), 1, 0.5
-};
+}];
 for i = 1:size(A,1)
     got = A{i,2}; wantv = A{i,3}; tol = A{i,4};
     ok = abs(got-wantv) <= tol;
@@ -210,11 +256,14 @@ for i = 1:size(A,1)
             sprintf('%.3f+/-%.3f', wantv, tol), tern(ok,'PASS','FAIL'));
 end
 
+close all;                       % leave no windows behind, ever
+
 pass    = (nfail == 0);
 nchecks = size(C,1) + size(A,1) + 2;
 fprintf('-----------------------------------------------\n');
-fprintf('%s   (%d checks, %d failed)\n', ...
-        tern(pass,'ALL PASS','*** FAILURES ***'), nchecks, nfail);
+fprintf('%s   (%d checks, %d failed) in %.1f s%s\n', ...
+        tern(pass,'ALL PASS','*** FAILURES ***'), nchecks, nfail, toc(t_start), ...
+        tern(has_ttc, '', '   [CI mode: no TTC_Data - fit and staleness NOT covered]'));
 if ~pass
     error('vd_selftest:failed','%d self-test check(s) failed - see table above.', nfail);
 end

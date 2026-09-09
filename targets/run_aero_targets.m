@@ -86,11 +86,13 @@ out = struct('pts_baseline', pts0, 'pts_target', pts_t, 'dcla', DCLA, ...
              'xr_m', xr_m, 'ld_floor_full', ld_floor_full, ...
              'ld_floor_drag', ld_floor_drag, 'target_detail', d_t);
 
+if vd_plots()
 try
     make_plot(p, DCLA, LD_PKG, P, pts0, CLA_TARGET, pts_t, here);
     fprintf('Plot written: plots/aero_targets.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

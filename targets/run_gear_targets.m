@@ -101,17 +101,21 @@ out = struct('gr', GR, 't_lap', t_lap, 't_acc', t_acc, 'vmax', vmax, ...
 
 outdir = fullfile(here, 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
+if vd_plots()
 try
     penalty_plot(p, GR, t_lap, t_acc, BAND_OK, BAND_PREF, gr_e, outdir);
     fprintf('Plot written: plots/gear_freeze_penalty.png\n');
 catch e
     fprintf('[penalty plot skipped: %s]\n', e.message);
 end
+end
+if vd_plots()
 try
     robustness_plot(p, GR, t_lap(:,1), GRr, t_rob, RPM_ALT, BAND_OK, BAND_PREF, outdir);
     fprintf('Plot written: plots/gear_freeze_robustness.png\n');
 catch e
     fprintf('[robustness plot skipped: %s]\n', e.message);
+end
 end
 end
 

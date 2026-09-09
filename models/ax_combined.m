@@ -95,7 +95,8 @@ F_in  = W/2 - dF;
 if F_in <= 0
     cap = mu_of_load(p, W/N_PER_LBF) * W;           % inner lifted
 else
-    cap = mu_of_load(p, F_out/N_PER_LBF)*F_out + mu_of_load(p, F_in/N_PER_LBF)*F_in;
+    mu2 = mu_of_load(p, [F_out F_in]/N_PER_LBF);    % both tires, one call
+    cap = mu2(1)*F_out + mu2(2)*F_in;
 end
 end
 

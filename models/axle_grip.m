@@ -85,7 +85,11 @@ if lifted                       % inner wheel off the ground
     F_out = W;  F_in = 0;
     cap = mu_of(p, F_out, gam_out) * F_out;
 else
-    cap = mu_of(p, F_out, gam_out) * F_out + mu_of(p, F_in, gam_in) * F_in;
+    % BOTH tires in one call. mu_of_load is vectorised, so this is the same
+    % arithmetic element by element - and this line runs ~120k times per g-g-V
+    % surface, where per-call overhead was the dominant cost.
+    mu2 = mu_of(p, [F_out F_in], [gam_out gam_in]);
+    cap = mu2(1) * F_out + mu2(2) * F_in;
 end
 end
 

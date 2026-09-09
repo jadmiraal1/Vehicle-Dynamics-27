@@ -79,11 +79,13 @@ out.dWlat_per_kg = dWlat_per_kg;
 out.a_roll_now   = a_roll_now;
 out.cfg          = cfg;
 
+if vd_plots()
 try
     make_plots(p, cfg, h_cg_ceiling, track_floor);
     fprintf('\nPlots written: load_transfer_targets.png\n\n');
 catch err
     fprintf('\n[plot skipped: %s]\n\n', err.message);
+end
 end
 end
 

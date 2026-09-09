@@ -1,6 +1,6 @@
 function h = vd_hash(files)
 % VD_HASH  Content hash over files (md5, sorted by basename); Python-reproducible.
-% Stamps tire_coeffs.mat; vd_selftest compares to detect a stale artifact.
+% Stamps tire_coeffs_<CAR>.mat; vd_selftest compares to detect a stale artifact.
 
 names = cell(size(files));
 for i = 1:numel(files)

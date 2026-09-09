@@ -29,8 +29,14 @@ for k = 1:numel(tire_names)
     D = load_tire_data(data_dir, [tire '_*.mat']);
     Fz_mag = -D.FZ;                                    % SAE: FZ < 0 under load
 
-    % Pure-slip lateral samples in the design load band
-    pure_slip      = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 5);
+    % Pure-slip lateral samples in the design load band, ROLLING ONLY.
+    % Same reason as pacejka_fit: roughly half the samples in each tire's first
+    % TTC run are below 5 mph and carry almost no lateral force. The 99th
+    % percentile is far more robust to that than a median fit is - dropping
+    % them moves this screening number by only +0.3% to +1.3% - but a
+    % percentile taken over a population that is half non-rolling is still not
+    % the quantity anyone thinks it is.
+    pure_slip      = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 5) & (D.V > 20);
     at_design_load = pure_slip & (abs(Fz_mag - Fz_design_lbf) < Fz_design_lbf * LOAD_BAND);
 
     mu_y_raw = peak_friction(D.FY, D.FZ, at_design_load);
@@ -79,7 +85,7 @@ end
 
 function D = load_tire_data(data_dir, pattern)
 % Concatenate channels from all non-raw files matching pattern; missing -> NaN.
-channels = {'FY', 'FZ', 'FX', 'IA', 'P', 'SA'};
+channels = {'FY', 'FZ', 'FX', 'IA', 'P', 'SA', 'V'};
 files    = dir(fullfile(data_dir, pattern));
 chunks   = cell(numel(files), numel(channels));
 

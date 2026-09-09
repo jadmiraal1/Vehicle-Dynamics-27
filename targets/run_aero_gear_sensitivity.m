@@ -82,11 +82,13 @@ out = struct('GR', GR, 't_lap', t_lap, 't_acc', t_acc, 'vmax', vmax, ...
 
 outdir = fullfile(here, 'plots');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
+if vd_plots()
 try
     aero_gear_plot(p, GR, pen_lap, pen_acc, S, BAND_OK, BAND_PREF, TOL, outdir);
     fprintf('Plot written: plots/gear_aero_sensitivity.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 

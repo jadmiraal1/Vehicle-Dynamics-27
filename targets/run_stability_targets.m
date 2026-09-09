@@ -45,7 +45,7 @@ for i = 1:numel(CHI)
     fprintf('   %5.0f%% ', 100*CHI(i)); fprintf(' %+7.3f', K_map(i,:)); fprintf('%s\n', mark);
 end
 
-fprintf('\nLIMITS: linear / sub-limit (~0.4 g lateral); K ill-conditioned -> sign and trend only.\n');
+fprintf('\nCaveat: linear / sub-limit (~0.4 g lateral); K ill-conditioned -> sign and trend only.\n');
 fprintf('   This does not set the rearward mass limit: K is negative under power for all\n');
 fprintf('   realistic splits (normal RWD, managed by diff/throttle/LLTD, not static mass).\n');
 fprintf('   The rearward limit is a friction-circle limit effect -> needs combined-slip\n');
@@ -56,11 +56,13 @@ fprintf('   read off the balance cost of a chosen split, not to pick the split.\
 out = struct('ax', AX, 'chi', CHI, 'K_ax', K_ax, 'K_map', K_map, ...
              'chi_neutral_ss', chi_ss, 'K_static', K_now, 'chi_current', p.mass_dist_f);
 
+if vd_plots()
 try
     make_plot(p, CHI, AX, K_map, chi_ss);
     fprintf('Plot written: plots/stability_targets.png\n');
 catch e
     fprintf('[plot skipped: %s]\n', e.message);
+end
 end
 end
 
