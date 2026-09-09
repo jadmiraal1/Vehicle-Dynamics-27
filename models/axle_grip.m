@@ -1,6 +1,14 @@
 function out = axle_grip(p, v)
-% AXLE_GRIP  Per-axle lateral limit [g] with load transfer + load-sensitive mu.
-%   out = axle_grip(p, v)   v sets downforce. Theory: ref doc sec 11.
+% AXLE_GRIP  Per-axle lateral limit [g] with load transfer, load-sensitive mu
+% and per-corner camber.
+%   out = axle_grip(p, v)   v sets downforce. Theory: ref doc sec 11, 8b.
+%
+% CAMBER enters through p.camber_deg.{fo,fi,ro,ri} - the camber each corner
+% actually runs, in degrees, positive = the helpful lean (models/tire_camber.m).
+% All four default to ZERO, and at zero this function returns exactly the number
+% it returned before camber existed. Supplying camber is a deliberate act:
+% nothing in the toolchain yet computes it from suspension geometry, so it is an
+% input until VD_model_architecture seam 3 (suspension_state) is built.
 
 DF   = 0.5 * p.rho * p.ClA * v^2;                      % downforce [N]
 W_f  = p.m * p.g * p.mass_dist_f       + p.aero_df_front     * DF;
@@ -53,24 +61,38 @@ function [cap_f, cap_r, Fz, lift] = capacities(p, W_f, W_r, ay)
 dF_f = p.LLTD       * p.m * ay * p.h_cg / p.t_f;
 dF_r = (1 - p.LLTD) * p.m * ay * p.h_cg / p.t_r;
 
-[cap_f, Fz.fo, Fz.fi, lf] = axle_cap(p, W_f, dF_f);
-[cap_r, Fz.ro, Fz.ri, lr] = axle_cap(p, W_r, dF_r);
+g = corner_camber(p);
+[cap_f, Fz.fo, Fz.fi, lf] = axle_cap(p, W_f, dF_f, g.fo, g.fi);
+[cap_r, Fz.ro, Fz.ri, lr] = axle_cap(p, W_r, dF_r, g.ro, g.ri);
 lift = lf || lr;
 end
 
-function [cap, F_out, F_in, lifted] = axle_cap(p, W, dF)
+function g = corner_camber(p)
+% Per-corner camber [deg], defaulting to zero. Kept in one place so the
+% "no camber field = old behaviour" rule has exactly one implementation.
+g = struct('fo', 0, 'fi', 0, 'ro', 0, 'ri', 0);
+if ~isfield(p, 'camber_deg') || isempty(p.camber_deg), return; end
+for f = {'fo','fi','ro','ri'}
+    if isfield(p.camber_deg, f{1}), g.(f{1}) = p.camber_deg.(f{1}); end
+end
+end
+
+function [cap, F_out, F_in, lifted] = axle_cap(p, W, dF, gam_out, gam_in)
 F_out = W/2 + dF;
 F_in  = W/2 - dF;
 lifted = F_in <= 0;
 if lifted                       % inner wheel off the ground
     F_out = W;  F_in = 0;
-    cap = mu_of(p, F_out) * F_out;
+    cap = mu_of(p, F_out, gam_out) * F_out;
 else
-    cap = mu_of(p, F_out) * F_out + mu_of(p, F_in) * F_in;
+    cap = mu_of(p, F_out, gam_out) * F_out + mu_of(p, F_in, gam_in) * F_in;
 end
 end
 
-function mu = mu_of(p, Fz_N)
-% Load-sensitive friction, DERATED, via the shared evaluator. Below the design
-mu = mu_of_load(p, Fz_N / 4.44822);
+function mu = mu_of(p, Fz_N, gamma_deg)
+% Load-sensitive friction, DERATED, with camber, via the shared evaluator.
+% Note WHICH tire gets which camber matters here and it is easy to get
+% backwards: the outer tire carries most of the load, so its camber dominates
+% the axle capacity, and on this tire camber COSTS peak grip at high load.
+mu = mu_of_load(p, Fz_N / 4.44822, gamma_deg);
 end

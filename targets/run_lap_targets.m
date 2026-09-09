@@ -1,7 +1,13 @@
-function out = run_lap_targets()
+function out = run_lap_targets(p)
 % RUN_LAP_TARGETS  Lap-derived targets: lap times, mass sensitivity, accel.
+%
+%   out = run_lap_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_lap_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_lap_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 here = vd_root();
 
 fprintf('\nCONCEPT-TIER LAP-SIM TARGETS  (%s, %s, v_max %.1f m/s = %.0f mph)\n', ...
@@ -62,8 +68,9 @@ end
 % --- T-MS3 : full-lap mass sensitivity ---
 if ~isempty(lap_s)
     [~, t0] = lap_sim(p, lap_s, lap_k, [], true);
-    p2 = p;  p2.m = p.m + 10;
-    p2.k_rot = 1 + (4*p2.I_wheel + p2.I_rotor*p2.gear_ratio^2)/(p2.m*p2.Re^2);
+    % +10 kg on the car (identical to the old p.m + 10, since m = m_car +
+    % m_driver), but now k_rot, Izz, axle loads and Fz_design_lbf follow too.
+    p2 = vd_set(p, 'm_car', p.m_car + 10);
     [~, t1] = lap_sim(p2, lap_s, lap_k, [], true);
     dtdm = (t1 - t0)/10;
     fprintf('[T-MS3  ] mass sensitivity : %.1f ms/kg over the lap (%.4f s/kg)\n', dtdm*1000, dtdm);

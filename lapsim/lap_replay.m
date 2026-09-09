@@ -1,10 +1,13 @@
-function lap_replay(track_csv, speedup)
+function lap_replay(track_csv, speedup, p)
 % LAP_REPLAY  Animated speed-trace replay of the lap sim.
+%
+%   lap_replay(track_csv, speedup)      the active car
+%   lap_replay(track_csv, speedup, p)   an explicit params struct (see vd_set)
 
 if nargin < 1 || isempty(track_csv), track_csv = 'track_representative.csv'; end
 if nargin < 2, speedup = 1; end
 
-p    = vehicle_params();
+if nargin < 3 || isempty(p), p = vehicle_params(); end   % no p = the active car
 here = vd_root();
 [s, kappa, x, y] = load_track(fullfile(here, 'tracks', track_csv));
 [v, t_lap] = lap_sim(p, s, kappa, [], true);

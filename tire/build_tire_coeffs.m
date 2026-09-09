@@ -23,6 +23,33 @@ T.mu_coef           = R.mu_coef;
 T.Ca_coef           = R.Ca_coef;
 T.Fz_design_lbf     = Fz_design;
 
+% --- Per-load-bin Magic Formula table ------------------------------------
+% B, C and E per tested load, so tire_forces can build a whole Fy(alpha) curve
+% instead of only the peak. D is NOT stored: it is regenerated from mu_coef so
+% that the curve and mu_of_load can never disagree about the peak.
+ok_mf              = ~isnan(R.Fz_lbf);
+T.mf_bin_Fz_lbf    = R.Fz_lbf(ok_mf);
+T.mf_bin_B         = R.B(ok_mf);
+T.mf_bin_C         = R.C(ok_mf);
+T.mf_bin_E         = R.E(ok_mf);
+
+% --- Camber sensitivity ---------------------------------------------------
+% Flattened onto the artifact (not nested) because vehicle_params copies fields
+% one by one and a nested struct there would be a second place to keep in sync.
+% gamma > 0 = the helpful lean; see models/tire_camber.m.
+CB                     = R.camber;
+T.camber_kD            = CB.kD;              % peak factor   1 + (kD1+kD2*dfz+kD3*dfz^2)*g + kD4*g^2
+T.camber_kC            = CB.kC;              % stiffness     1 + kC1*g^2
+T.camber_kS            = CB.kS;              % thrust        (kS1+kS2*dfz)*g  [deg of slip]
+T.camber_Fz_ref_lbf    = CB.Fz_ref_lbf;      % dfz = (Fz - ref)/ref
+T.camber_Fz_min_lbf    = CB.Fz_min_lbf;      % fitted load box - clamped, not extrapolated
+T.camber_Fz_max_lbf    = CB.Fz_max_lbf;
+T.camber_gamma_max_deg = CB.gamma_max_deg;   % fitted camber range
+T.camber_rms           = [CB.rms_peak CB.rms_stiff CB.rms_offset];
+T.camber_n             = [CB.n_peak  CB.n_stiff  CB.n_offset];
+T.camber_status        = CB.status;
+T.camber_basis         = CB.basis;
+
 % --- Anisotropy mu_x/mu_y: the cross-tire transfer, now computed ---------
 Fz_lat = R.long18.Fz_lat6;
 alpha  = linspace(0, 25, 5000);
@@ -80,11 +107,18 @@ T.n_env_brake  = R.long18.brake.n_envelope;   % ... BRAKE (18in LC0 held-SA swee
 T.tire_id          = p.tire_id;
 T.tire_data_prefix = p.tire_data_prefix;
 T.basis            = 'pacejka-curve';
+% Bump SCHEMA_VERSION whenever a field is added, removed or redefined here.
+% vehicle_params refuses an artifact it does not recognise and names the fix,
+% so an old .mat can never be read as if it were a new one.
+%   1 : (implicit) everything before Sep 2026
+%   2 : + camber_* terms, + mf_bin_* table
+T.schema_version   = 2;
 T.built_by         = 'build_tire_coeffs.m';
 T.built_on         = datestr(now, 'yyyy-mm-dd HH:MM');
 T.src_hash         = vd_hash(tire_src_files(here));
 
-save(fullfile(vd_root(), 'tire_coeffs.mat'), '-struct', 'T');   % artifact lives at repo root
+T.car = p.car;                                   % which config this was built for
+save(fullfile(vd_root(), ['tire_coeffs_' p.car '.mat']), '-struct', 'T');   % per-car artifact at repo root
 
 % ---- compact console summary ----
 fb   = abs(T.mu_hiload_slope - T.mu_coef(1)) < 1e-9;   % donor slope fell back to design
@@ -102,7 +136,24 @@ fprintf('    outer tire %.0f lbf (donor cover %.0f)%s\n', ...
 fprintf('    band @ outer: central %.3f  vs  low %.3f  (%+.0f%%)%s\n', ...
         T.mu_outer_central, T.mu_outer_low, band, ...
         ternary(fb, '   [fallback: edge ~ donor ceiling, band ~ 0]', ''));
-fprintf('    wrote tire_coeffs.mat   (hash %s)\n', T.src_hash(1:8));
+fprintf('    camber  %s\n', T.camber_status);
+if ~strcmp(T.camber_status, 'ok')
+    fprintf(2, '    ! camber terms are all zero - the model will behave as it did before.\n');
+else
+    for gshow = [2 4]
+        fprintf(['    camber  gamma %+d deg: peak x%.3f @ %3.0f lbf, x%.3f @ %3.0f lbf' ...
+                 '   stiffness x%.3f   thrust %+.2f deg slip @ %3.0f lbf\n'], gshow, ...
+                cam_fD(T, T.camber_Fz_min_lbf, gshow), T.camber_Fz_min_lbf, ...
+                cam_fD(T, T.camber_Fz_max_lbf, gshow), T.camber_Fz_max_lbf, ...
+                1 + T.camber_kC(1)*gshow^2, ...
+                (T.camber_kS(1) + T.camber_kS(2)*(T.camber_Fz_max_lbf - T.camber_Fz_ref_lbf)/T.camber_Fz_ref_lbf)*gshow, ...
+                T.camber_Fz_max_lbf);
+    end
+    fprintf('    camber  fit RMS  peak %.3f  stiffness %.3f  thrust %.3f deg   (n = %d/%d/%d)\n', ...
+            T.camber_rms(1), T.camber_rms(2), T.camber_rms(3), T.camber_n(1), T.camber_n(2), T.camber_n(3));
+end
+fprintf('    schema  v%d\n', T.schema_version);
+fprintf('    wrote tire_coeffs_%s.mat   (hash %s)\n', p.car, T.src_hash(1:8));
 fprintf('\n  re-issue grip targets #8 #12 #13 #48 #49 #61-65, then run vd_selftest.\n\n');
 
 if nargout == 0, clear T; end   % don't auto-dump the struct when called as a command
@@ -110,6 +161,14 @@ end
 
 function s = ternary(cond, a, b)
 if cond, s = a; else, s = b; end
+end
+
+function f = cam_fD(T, Fz_lbf, gamma_deg)
+% Peak-factor preview for the console summary only. models/tire_camber.m is the
+% single implementation that anything downstream is allowed to use.
+dfz = (Fz_lbf - T.camber_Fz_ref_lbf) / T.camber_Fz_ref_lbf;
+f = 1 + (T.camber_kD(1) + T.camber_kD(2)*dfz + T.camber_kD(3)*dfz^2)*gamma_deg ...
+      + T.camber_kD(4)*gamma_deg^2;
 end
 
 function [slope_hi, cov_lbf, spread_pct, donors, n_spread] = donor_hiload_slope(R, edge, mu_coef_design)
@@ -179,6 +238,7 @@ function files = tire_src_files(here)
 % must match tests/vd_selftest.m/tire_src_files exactly.
 files = {fullfile(here, 'pacejka_fit.m'), ...
          fullfile(here, 'ttc_fit.m'), ...
+         fullfile(here, 'camber_fit.m'), ...
          fullfile(here, 'build_tire_coeffs.m')};
 d = dir(fullfile(vd_root(), 'TTC_Data', '*.mat'));
 for i = 1:numel(d)

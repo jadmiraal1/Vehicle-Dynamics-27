@@ -1,10 +1,16 @@
-function out = run_gear_targets()
+function out = run_gear_targets(p)
 % RUN_GEAR_TARGETS  Final-drive sweep -> lap times, 75 m, top speed (#41).
 % Rev cap is voltage-governed (~4500 rpm at this pack), not the 5500 mechanical rating.
 % Writes the two freeze-evidence figures: plots/gear_freeze_penalty.png (the
 % plateau, all events) and plots/gear_freeze_robustness.png (rev-ceiling bracket).
+%
+%   out = run_gear_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_gear_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_gear_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 GR     = 2.8:0.05:5.0;                               % final-drive ratio sweep [-]
 tracks = {'track_endurance.csv', 'track_autocross.csv'};
@@ -112,11 +118,7 @@ end
 
 function p = set_gear(p, gr, rpm)
 % Same car at a different final drive / rev ceiling (rebuild the derived pair).
-p.gear_ratio    = gr;
-p.rpm_motor_max = rpm;
-sumI    = 4*p.I_wheel + p.I_rotor * gr^2;
-p.k_rot = 1 + sumI / (p.m * p.Re^2);
-p.v_max = (rpm / gr) * (2*pi/60) * p.Re;
+p = vd_set(p, 'gear_ratio', gr, 'rpm_motor_max', rpm);   % k_rot and v_max follow
 end
 
 

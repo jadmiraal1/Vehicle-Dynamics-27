@@ -25,6 +25,7 @@ LBF_DEG_TO_N_RAD = N_PER_LBF * 180/pi;
 Fz_design        = p.m * p.g / 4 / N_PER_LBF;   % design corner load [lbf], just assumes mean
 
 fprintf('\nPACEJKA PURE-LATERAL FIT  (IA<1.5deg, P 9-13 psi)\n');
+fprintf('  + camber sensitivity from the TTC camber sweeps (tire/camber_fit.m)\n');
 
 % Loading and filtering raw data
 for t = 1:numel(TIRES)
@@ -35,6 +36,18 @@ for t = 1:numel(TIRES)
     % Pure lateral, near-zero camber, near-target pressure; drop the
     base = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 30) & (abs(D.IA) < 1.5) ...
            & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0);
+
+    % KNOWN ISSUE, deliberately not fixed in this change. The mask above does
+    % not filter on road speed, and some TTC runs contain near-static segments
+    % (for the design tire, file _1 is 99% below 5 mph and supplies roughly half
+    % the samples in three of the five load bins). A tire that is not rolling
+    % makes almost no lateral force, so those samples pull the binned medians
+    % down: the same fit restricted to V > 20 mph gives mu_y about 4% HIGHER at
+    % the design load (2.47 vs 2.38). Fixing it moves every issued grip target,
+    % so it belongs in its own change rather than folded into the camber work.
+    % camber_fit DOES apply the rolling filter, because camber thrust does not
+    % exist at all in a static contact patch.
+    report_static_fraction(tire, D, base);
 
     n = numel(LOAD_BINS_LBF);
     T = struct('Fz_lbf', nan(1,n), 'B', nan(1,n), 'C', nan(1,n), ...
@@ -87,6 +100,12 @@ for t = 1:numel(TIRES)
     T.mu_coef    = polyfit(T.Fz_lbf(idp), T.mu_peak(idp), 1); % fits peak grip as straight line vs load
     T.Ca_coef    = polyfit(T.Fz_lbf(ok), T.Ca_lbf_deg(ok), 2); % fits cornering stiffness as quadratic vs load
     T.mu_coef_used_extrapolated_peaks = used_fallback; % flag for downstream/diagnostics
+    % Camber sensitivity. Separate file, separate data mask (rolling only),
+    % separate normalisation - see tire/camber_fit.m for why. It cannot change
+    % anything above it: the camber terms are RATIOS against the gamma = 0
+    % curves fitted here, so at gamma = 0 they are exactly 1.
+    T.camber = camber_fit(data_dir, tire, true);
+
     R.(tire) = T; % store in struct
 
     if used_fallback && any(ok & ~T.peak_in_sweep)
@@ -124,6 +143,17 @@ fprintf('\nDesign tire %s at %.0f lbf: mu_peak %.3f, Ca %.1f lbf/deg = %.0f N/ra
         Ca_design, Ca_design*LBF_DEG_TO_N_RAD);
 fprintf('Note: MF peak reads the median curve; ttc_fit 99th percentile reads the\n');
 fprintf('upper envelope. Figures: run tire_report (presentation layer).\n');
+end
+
+function report_static_fraction(tire, D, base)
+% Say out loud how much of the zero-camber fit came from non-rolling samples.
+if ~isfield(D, 'V') || isempty(D.V), return; end
+f = nnz(base & (D.V < 5)) / max(nnz(base), 1);
+if f > 0.05
+    fprintf(2, ['  ! %s: %.0f%% of the zero-camber samples are below 5 mph ' ...
+                '(non-rolling).\n    See the KNOWN ISSUE note in pacejka_fit.m ' ...
+                '- peak mu is biased low.\n'], tire, 100*f);
+end
 end
 
 function y = mf(p, alpha)
@@ -291,7 +321,7 @@ v    = x(lo+1) + (rank - lo) * (x(min(lo+2, n)) - x(lo+1));
 end
 
 function D = load_channels(data_dir, pattern)
-channels = {'SA','FY','FX','FZ','IA','P'};
+channels = {'SA','FY','FX','FZ','IA','P','V'};
 files    = dir(fullfile(data_dir, pattern));
 chunks   = cell(numel(files), numel(channels));
 for i = 1:numel(files)

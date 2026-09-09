@@ -1,7 +1,13 @@
-function out = params_report()
+function out = params_report(p)
 % PARAMS_REPORT  One-page summary of vehicle_params -> console/plots.
+%
+%   out = params_report()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = params_report(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = params_report(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p    = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 here = vd_root();
 
 % Parse the SOURCE for tier banners and provenance comments; values come

@@ -1,8 +1,14 @@
-function out = run_wdist_targets()
+function out = run_wdist_targets(p)
 % RUN_WDIST_TARGETS  Weight-distribution sweep (T-WDIST). Grip ~flat vs split;
 % steady-state favours rear; rearward LIMIT needs the transient model (not this).
+%
+%   out = run_wdist_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_wdist_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_wdist_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 CHI_SWEEP   = 0.38:0.01:0.52;   % static front mass fraction
 V_LOW       = 12;               % skidpad-ish speed [m/s]
@@ -17,9 +23,7 @@ ay = nan(1,n); accel = nan(1,n); brake = nan(1,n);
 lltd_neu = nan(1,n); trimmable = false(1,n);
 for i = 1:n
     chi = CHI_SWEEP(i);
-    p2 = p;  p2.mass_dist_f = chi;
-    p2.a = p2.L*(1-chi);  p2.b = p2.L*chi;                 % keep derived CG consistent
-    p2.Wf_static = p2.m*p2.g*chi;  p2.Wr_static = p2.m*p2.g*(1-chi);
+    p2 = vd_set(p, 'mass_dist_f', chi);      % a, b, Wf/Wr_static, Izz all follow
 
     lltd_neu(i)  = balance_lltd(p2, V_LOW, LLTD_RANGE);
     trimmable(i) = lltd_neu(i) > LLTD_RANGE(1) && lltd_neu(i) < LLTD_RANGE(2);
@@ -27,7 +31,7 @@ for i = 1:n
     p2.LLTD = min(max(lltd_neu(i), LLTD_RANGE(1)), LLTD_RANGE(2));
     G = axle_grip(p2, V_LOW);   ay(i)    = G.ay_lim_g;
     Gg = gg_envelope(p2, V_ACC); accel(i) = Gg.ax_accel;
-    brake(i) = brake_axle_limit(p2);
+    brake(i) = ax_limit(p2, V_LOW, 'brake');   % models/ax_limit is the ONE brake solver
 end
 
 % Recommendation: grip is flat, so the target is packaging-rearmost SUBJECT to
@@ -91,21 +95,6 @@ end
 Ln = (lo + hi)/2;
 end
 
-function D = brake_axle_limit(p)
-% Per-axle, load-sensitive straight-line braking limit [g], ideal bias.
-% Under decel D load shifts forward: Wf rises, Wr falls. Both axles at the
-% friction limit simultaneously (ideal bias). Bisection on D.
-lo = 0;  hi = 3;
-for it = 1:60
-    D  = (lo + hi)/2;
-    Wf = p.m*p.g*p.mass_dist_f     + p.m*D*p.g*p.h_cg/p.L;
-    Wr = p.m*p.g*(1-p.mass_dist_f) - p.m*D*p.g*p.h_cg/p.L;
-    if Wr <= 0, hi = D; continue; end
-    cap = mu_of_load(p, Wf/2/4.44822)*Wf + mu_of_load(p, Wr/2/4.44822)*Wr;
-    if cap/(p.m*p.g) >= D, lo = D; else, hi = D; end
-end
-D = lo;
-end
 
 function make_plot(p, chi, ay, accel, brake, lltd, floor_conv, rng)
 f = figure('Visible','off','Position',[60 60 1180 400],'Color','w');

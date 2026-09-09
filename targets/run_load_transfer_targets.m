@@ -1,7 +1,13 @@
-function out = run_load_transfer_targets()
+function out = run_load_transfer_targets(p)
 % RUN_LOAD_TRANSFER_TARGETS  CG/track/bias targets from quasi-static load transfer.
+%
+%   out = run_load_transfer_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_load_transfer_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_load_transfer_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 out = struct();   % populated below
 

@@ -1,7 +1,13 @@
-function out = run_balance_targets()
+function out = run_balance_targets(p)
 % RUN_BALANCE_TARGETS  Mid-tier balance: skidpad w/ load sensitivity, LLTD + CoP bands.
+%
+%   out = run_balance_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_balance_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_balance_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 V_SKID_R   = 9.125;          % skidpad radius [m]
 LLTD_SWEEP = 0.30:0.01:0.80;

@@ -1,7 +1,10 @@
-function tire_report()
+function tire_report(p)
 % TIRE_REPORT  Presentation figures for the tire fits -> plots/.
+%
+%   tire_report()      the active car
+%   tire_report(p)     an explicit params struct (see vd_set)
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no p = the active car
 evalc('R = pacejka_fit();');
 TIRES  = {'LC0_16x75','R20_16x75','R20_18x60','GY_18x65'};
 tire_c = [0.00 0.45 0.70; 0.90 0.62 0.00; 0.00 0.62 0.45; 0.84 0.37 0.00];

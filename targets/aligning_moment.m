@@ -1,9 +1,15 @@
-function out = aligning_moment()
+function out = aligning_moment(p)
 % ALIGNING_MOMENT  Steering targets from tire self-aligning moment (#52-54):
 % T-MZ peak torque/tire, T-CAS caster transfer chart, trail diagnostics.
 % Theory: ref doc sec 8 and 13.
+%
+%   out = aligning_moment()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = aligning_moment(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = aligning_moment(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 LAMBDA_T   = 1.0;          % pneumatic-trail belt->track (baseline; measure to refine)
 V_LOW      = 12;           % low-speed corner = steering worst case (no aero help)

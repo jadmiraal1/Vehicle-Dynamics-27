@@ -1,9 +1,12 @@
-function lap_report(track_csv)
+function lap_report(track_csv, p)
 % LAP_REPORT  Lap dashboard + endurance energy budget figures -> plots/.
 % Prints axle vs point-mass lap times side by side.
+%
+%   lap_report(track_csv)      the active car
+%   lap_report(track_csv, p)   an explicit params struct (see vd_set)
 
 if nargin < 1 || isempty(track_csv), track_csv = 'track_endurance.csv'; end
-p    = vehicle_params();
+if nargin < 2 || isempty(p), p = vehicle_params(); end   % no p = the active car
 % Scenario assumptions from p.scenario (vehicle_params) - single source, so these
 % cannot silently drift apart from run_energy_strategy / run_aero_targets.
 REGEN_CAPTURE = p.scenario.regen_capture;

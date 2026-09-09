@@ -1,7 +1,13 @@
-function out = run_aero_targets()
+function out = run_aero_targets(p)
 % RUN_AERO_TARGETS  ClA / CdA / L/D / aero-balance targets vs 2026 benchmarks.
+%
+%   out = run_aero_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_aero_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_aero_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 here = vd_root();
 
 % Sweep and package assumptions
@@ -95,37 +101,34 @@ CdA = ctx.p.CdA + dcla / ld_pkg;            % inf -> baseline drag
 end
 
 function [pts, d] = score_point_abs(ctx, dcla, CdA, dm)
-p2      = ctx.p;
-p2.ClA  = ctx.p.ClA + dcla;
-p2.CdA  = CdA;
-p2.m    = ctx.p.m + dm;
-sumI    = 4*p2.I_wheel + p2.I_rotor * p2.gear_ratio^2;
-p2.k_rot = 1 + sumI / (p2.m * p2.Re^2);
-p2.Wf_static = p2.m * p2.g * p2.mass_dist_f;
-p2.Wr_static = p2.m * p2.g * (1 - p2.mass_dist_f);
+% dm is aero hardware bolted to the CAR, so it goes on m_car; vd_derive then
+% rebuilds total mass, axle loads, k_rot, Izz and Fz_design_lbf together.
+% (The old code set p2.m directly and re-derived only k_rot and the axle loads,
+% leaving Izz and Fz_design_lbf describing the lighter car.)
+p2 = vd_set(ctx.p, 'ClA', ctx.p.ClA + dcla, 'CdA', CdA, 'm_car', ctx.p.m_car + dm);
 
-% Sprint events (full power) with haircut
+% Sprint events (full power). RAW times - util/fsae_points applies the haircut,
+% so that correction has one home and every study inflates identically.
 s75 = (0:0.5:75)';
-[~, t_ac] = lap_sim(p2, s75, zeros(size(s75)), 0, false);
-t_ac = t_ac * (1 + ctx.haircut);
+[~, t_ac_raw] = lap_sim(p2, s75, zeros(size(s75)), 0, false);
 
 R_skid = 9.125;
-t_sk = 2*pi*R_skid / corner_speed(p2, 1/R_skid) * (1 + ctx.haircut);
+t_sk_raw = 2*pi*R_skid / corner_speed(p2, 1/R_skid);
 
-[~, t_ax] = lap_sim(p2, ctx.s_ax, ctx.k_ax, 0, false);
-t_ax = t_ax * (1 + ctx.haircut);
+[~, t_ax_raw] = lap_sim(p2, ctx.s_ax, ctx.k_ax, 0, false);
 
 % Endurance: solve the power cap that fits the pack with margin, run at it
 [t_en, E22, cap] = solve_endurance(ctx, p2);
-t_tot = t_en * ctx.laps * (1 + ctx.haircut*0.5);   % half haircut: pace is capped anyway
 
-% FSAE points vs real 2026 Tmins
-pts =       tscore(t_ac,  ctx.bm.accel_tmin_s,     1.50,  95.5,  4.5, false);
-pts = pts + tscore(t_sk,  ctx.bm.skidpad_tmin_s,   1.25,  71.5,  3.5, true);
-pts = pts + tscore(t_ax,  ctx.bm.autocross_tmin_s, 1.45, 118.5,  6.5, false);
-pts = pts + tscore(t_tot, ctx.bm.endurance_tmin_s, 1.45, 250.0, 25.0, false);
-ef  = (ctx.bm.endurance_tmin_s / t_tot) * (ctx.e_min / max(E22, ctx.e_min));
-pts = pts + min(100, max(0, 100 * (ef - 0.1) / (ctx.ef_max - 0.1)));
+% FSAE points vs real 2026 Tmins - util/fsae_points.m is the only copy.
+ev = struct('accel', t_ac_raw, 'skidpad', t_sk_raw, 'autocross', t_ax_raw, ...
+            'endurance_lap', t_en, 'laps', ctx.laps, 'energy_kWh', E22);
+[pts, brk] = fsae_points(ev, ctx.bm, struct('haircut', ctx.haircut, ...
+                         'ef_max', ctx.ef_max, 'e_min_kWh', ctx.e_min));
+
+% Report the times that were actually SCORED (post-haircut), exactly as before.
+t_ac  = brk.t_used.accel;      t_sk  = brk.t_used.skidpad;
+t_ax  = brk.t_used.autocross;  t_tot = brk.t_used.endurance_total;
 
 d = struct('t_ac', t_ac, 't_sk', t_sk, 't_ax', t_ax, 't_en', t_en, ...
            't_tot', t_tot, 'E22', E22, 'cap', cap, 'CdA', p2.CdA);
@@ -148,33 +151,6 @@ if isempty(r), cap = p2.P_max; else, cap = min(max(r), p2.P_max); end
 p3 = p2;  p3.P_max = cap;
 [~, t_en, E] = lap_sim(p3, ctx.s_en, ctx.k_en, [], true);
 E22 = (E.drive_acc_Wh - E.brake_wheel_Wh * ctx.rc * ctx.rt) * ctx.laps / 1000;
-end
-
-function s = tscore(t, tmin, fmax, pvar, pmin, squared)
-% FSAE event score. Tmin floors at OUR time (we'd set the benchmark).
-tmin = min(t, tmin);
-tmax = fmax * tmin;
-t    = min(t, tmax);
-if squared, ratio = (tmax/t)^2 - 1;  rmax = (tmax/tmin)^2 - 1;
-else,       ratio =  tmax/t    - 1;  rmax =  tmax/tmin    - 1;
-end
-s = pvar * ratio / rmax + pmin;
-end
-
-function bm = read_benchmarks(fname)
-fid = fopen(fname, 'r');
-if fid < 0, error('run_aero_targets:noBenchmarks', 'missing %s', fname); end
-bm = struct();
-while true
-    ln = fgetl(fid);
-    if ~ischar(ln), break; end
-    ln = strtrim(ln);
-    if isempty(ln) || ln(1) == '#' || startsWith(ln, 'metric'), continue; end
-    c = strsplit(ln, ',');
-    v = str2double(c{2});
-    if ~isnan(v), bm.(matlab.lang.makeValidName(c{1})) = v; end
-end
-fclose(fid);
 end
 
 function make_plot(p, DCLA, LD_PKG, P, pts0, cla_t, pts_t, here)

@@ -1,8 +1,14 @@
-function out = run_stability_targets()
+function out = run_stability_targets(p)
 % RUN_STABILITY_TARGETS  K under longitudinal load transfer + K(chi,ax) map.
 % Sign/trend tool. Does not set the rearward mass limit (needs combined-slip model).
+%
+%   out = run_stability_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_stability_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_stability_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 AX  = [-1.00 -0.50 -0.25 0 0.25 0.50];   % longitudinal accel grid [g] (- brake / + power)
 CHI = 0.38:0.02:0.54;                    % front mass fraction sweep [-]
@@ -61,12 +67,7 @@ end
 function pc = set_chi(p, chi)
 % Same car at a different static front mass fraction (rebuild the derived loads
 % understeer_at reads, so the sweep is self-consistent).
-pc = p;
-pc.mass_dist_f = chi;
-pc.Wf_static = pc.m * pc.g * chi;
-pc.Wr_static = pc.m * pc.g * (1 - chi);
-pc.a = pc.L * (1 - chi);
-pc.b = pc.L * chi;
+pc = vd_set(p, 'mass_dist_f', chi);   % a, b, Wf/Wr_static and Izz all follow
 end
 
 function chi = neutral_chi(p, ax)

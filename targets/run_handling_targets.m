@@ -1,7 +1,13 @@
-function out = run_handling_targets()
+function out = run_handling_targets(p)
 % RUN_HANDLING_TARGETS  Bicycle-model targets: K, stability speed, yaw gain/response.
+%
+%   out = run_handling_targets()      the active car, from vd_car / cars/config_<CAR>.m
+%   out = run_handling_targets(p)     an explicit params struct - use vd_set to build a
+%                            "what if?" car - no file on disk is touched:
+%       p = vehicle_params();
+%       out = run_handling_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
 
-p = vehicle_params();
+if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
 
 % Cornering stiffness comes from the artifact (p.Ca_coef, loaded from
 N_PER_LBF = 4.44822;

@@ -1,7 +1,14 @@
-function mu = mu_of_load(p, Fz_lbf)
+function mu = mu_of_load(p, Fz_lbf, gamma_deg)
 % MU_OF_LOAD  Load-sensitive peak lateral mu of the design tire, derated. Vectorized.
+%   mu = mu_of_load(p, Fz_lbf)              zero camber - unchanged behaviour
+%   mu = mu_of_load(p, Fz_lbf, gamma_deg)   with camber
+%
 % Measured fit to Fz_fit_max, donor-informed slope above; p.tire_hiload='low' brackets.
-% Theory: references/VD_physics_reference.md sec 13.
+% Camber multiplies the result by tire_camber's peak factor fD; gamma > 0 is the
+% helpful lean (see models/tire_camber.m for the sign). Calling this with two
+% arguments is EXACTLY the old function - fD(0) = 1 identically, not to within a
+% tolerance - which is what tests/vd_selftest.m asserts.
+% Theory: references/VD_physics_reference.md sec 13 (load), sec 8b (camber).
 
 % --- Input validation -----------------------------------------------------
 required = {'Fz_fit_max', 'mu_coef', 'mu_derate'};
@@ -64,4 +71,14 @@ if any(below)
 end
 
 mu = reshape(mu_raw * p.mu_derate, size(Fz_lbf));
+
+% --- camber ---------------------------------------------------------------
+% Separated deliberately: the load curve above is fitted from the near-zero
+% camber data, and the camber factor is a RATIO measured against that same
+% zero-camber condition. Multiplying is therefore the correct composition, and
+% it is also what makes gamma = 0 reduce to the old answer bit for bit.
+if nargin >= 3 && ~isempty(gamma_deg) && any(gamma_deg(:) ~= 0)
+    fD = tire_camber(p, reshape(Fz, size(Fz_lbf)), gamma_deg);
+    mu = mu .* fD;
+end
 end

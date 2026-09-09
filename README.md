@@ -59,6 +59,7 @@ to run stale and will say so.
 | `run_aero_targets` | downforce/drag/points trade study | aero_targets.png |
 | `run_energy_strategy` | endurance power cap and energy budget | energy_strategy.png |
 | `run_gear_targets` | final-drive study + freeze evidence | gear_freeze_*.png |
+| `run_camber_targets` | what camber is worth: grip, balance, skidpad | camber_targets.png |
 | `aligning_moment` | steering torque and caster chart | caster_target.png, aligning_moment.png |
 | `tire_report` | tire fit figures incl. stiffness/loaded radius | tire_*.png |
 | `lap_report` | lap dashboard and energy budget figures | lap_dashboard_*.png |
