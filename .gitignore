@@ -1,10 +1,10 @@
-# FSAE TTC data is licensed to registered teams only - NEVER commit or
-# redistribute it. Fresh clones: copy TTC_Data/ from the team drive
-# (vd_selftest's staleness gate will fail until you do - by design).
+# FSAE TTC data is licensed to registered teams only - never commit or
+# redistribute it. Copy TTC_Data/ from the team drive; without it vd_selftest
+# skips the tire-staleness check and says so.
 TTC_Data/
 
-# Vendor datasheets & team documents (copyright / size). Keep the docs we
-# authored: the physics reference and the pipeline diagram stay tracked.
+# Datasheets and internal documents (copyright / size) stay on the team
+# drive. Only the pipeline diagram is tracked.
 references/*
 !references/code_pipeline.mermaid
 
@@ -21,11 +21,11 @@ slprj/
 Thumbs.db
 desktop.ini
 
-# Generated outputs - every file here is reproduced by the run_* scripts
+# Generated figures (reproduced by the run_* scripts)
 plots/
 
-# Design-decision documents, trackers, releases, reports - live on the team
-# drive / locally, not in git. The benchmarks CSV stays: run_aero_targets reads it.
+# Trackers, releases and reports live on the team drive. The benchmarks CSV
+# is tracked because the points model reads it.
 organization/*
 !organization/comp_benchmarks_2026.csv
 /*.xlsx

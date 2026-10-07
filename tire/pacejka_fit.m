@@ -1,55 +1,48 @@
 function R = pacejka_fit()
-% PACEJKA_FIT  Magic Formula fit per load bin, all candidate tires.
-% Returns mu(Fz) and Ca(Fz) coefficients + the combined-slip envelope exponents
-% from the 18in LC0 held-SA sweeps. Theory: ref doc sec 8.
-
-% THIS IS now THE SOURCE OF design GRIP (Jul 2026). Promoted into the car by
-% build_tire_coeffs -> tire_coeffs_<CAR>.mat -> vehicle_params. Do not hand-copy
-% anything out of this function's printout into vehicle_params.
+% PACEJKA_FIT  Magic Formula lateral fits per load bin for each candidate tire.
+%   R = pacejka_fit()
+%
+% For each tire: bins the TTC data by vertical load, fits a 4-parameter
+% Magic Formula Fy = D*sin(C*atan(B*a - E*(B*a - atan(B*a)))) to the median
+% Fy(|slip|) curve of each bin, then fits peak mu linear in load and
+% cornering stiffness (B*C*D) quadratic in load. Also fits the 18in LC0
+% longitudinal curves and the combined-slip ellipse exponents, and calls
+% camber_fit. build_tire_coeffs turns the design tire's result into
+% tire_coeffs_<CAR>.mat; never copy numbers from the printout by hand.
+% Theory: VD_physics_reference.md sec 8.
 
 p = vehicle_params('bootstrap');   % car mass only; must not require the
                                    % artifact that this fit produces
 
 % Fit setup
 TIRES         = {'LC0_16x75', 'R20_16x75', 'R20_18x60', 'GY_18x65'};
-LOAD_BINS_LBF = [50 100 150 200 250]; % isolate data at discrete vertical loads to run fits at different load cases
-LOAD_BAND     = 0.15;                 % +/-15% of data is accepted around each bin
-SA_EDGES      = 0.25:0.5:12.25;      % |slip angle| bins [deg], discretizes the 'continuous' slip angle data into bins to deal with noisy raw data
-MIN_BIN_N     = 40;                  % each slip angle bin req 40 samples to be trustworthy
-MIN_TREND_PTS = 3;                   % min valid load bins needed for mu/Ca vs load trend fits
-V_MIN_MPH     = 20;                  % ROLLING ONLY - see the note on the mask below
+LOAD_BINS_LBF = [50 100 150 200 250]; % nominal vertical loads tested [lbf]
+LOAD_BAND     = 0.15;                 % accept +/-15% around each load
+SA_EDGES      = 0.25:0.5:12.25;      % |slip angle| bin edges [deg]
+MIN_BIN_N     = 40;                  % samples needed in a slip bin
+MIN_TREND_PTS = 3;                   % load bins needed for the mu/Ca vs load fits
+V_MIN_MPH     = 20;                  % rolling samples only (see below)
 
 here     = vd_root();
 data_dir = fullfile(here, 'TTC_Data');
-N_PER_LBF        = 4.44822; % conversion rates
-LBF_DEG_TO_N_RAD = N_PER_LBF * 180/pi;
-Fz_design        = p.m * p.g / 4 / N_PER_LBF;   % design corner load [lbf], just assumes mean
+k                = vd_const();
+N_PER_LBF        = k.N_PER_LBF;
+LBF_DEG_TO_N_RAD = k.LBF_DEG_TO_N_RAD;
+Fz_design        = p.m * p.g / 4 / N_PER_LBF;   % mean static corner load [lbf]
 
 fprintf('\nPACEJKA PURE-LATERAL FIT  (IA<1.5deg, P 9-13 psi, V>%d mph)\n', V_MIN_MPH);
 fprintf('  + camber sensitivity from the TTC camber sweeps (tire/camber_fit.m)\n');
 
-% Loading and filtering raw data
 for t = 1:numel(TIRES)
     tire = TIRES{t};
     D = load_channels(data_dir, [tire '_*.mat']);
     Fz_mag = -D.FZ;
 
-    % Pure lateral, near-zero camber, near-target pressure, ROLLING; drop the
-    % 5-7 deg slip band where the sweep reverses.
-    %
-    % THE ROLLING FILTER (added Sep 2026, and it moved every grip number).
-    % Each of the four candidate tires has a first TTC run that is ~99% below
-    % 5 mph - 52 to 55% of the samples this mask would otherwise keep. A tire
-    % that is not rolling has no steady-state cornering force to give: at 150
-    % lbf and 4 deg of slip the static samples read Fy/Fz ~ 0.22 where the
-    % rolling ones read ~1.93. Including them dragged the binned medians down
-    % and the design tire's peak mu with them, by 4.1% at the design load
-    % (2.383 -> 2.481).
-    %
-    % Note WHY this had to be removed rather than corrected for: the bias is
-    % not uniform. Fitting on medians makes it partly self-limiting, so the
-    % same 50%-static contamination moved LC0_16x75 by +4.1% and R20_16x75 by
-    % -0.0%. An unpredictable bias cannot be calibrated away, only excluded.
+    % Pure lateral, near-zero camber, 9-13 psi, rolling; drop the 5-7 deg
+    % slip band where the sweep reverses (the tire is not in steady state).
+    % Rolling only: each tire's first TTC run is almost entirely below 5 mph,
+    % where a tire produces almost no cornering force; those samples pulled
+    % the design tire's peak mu down by ~4%.
     base = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 30) & (abs(D.IA) < 1.5) ...
            & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0) ...
            & (D.V > V_MIN_MPH);
@@ -67,16 +60,16 @@ for t = 1:numel(TIRES)
     for k = 1:n
         sel = base & (abs(Fz_mag - LOAD_BINS_LBF(k)) < LOAD_BINS_LBF(k)*LOAD_BAND);
         if nnz(sel) < 3000, continue; end % min samples for a fit
-        [alpha, fy] = binned_median_curve(D.SA(sel), -D.FY(sel), SA_EDGES, MIN_BIN_N); % takes median within each bin to represent SA to prevent skewed data (not actual line)
+        [alpha, fy] = binned_median_curve(D.SA(sel), -D.FY(sel), SA_EDGES, MIN_BIN_N);
         T.curves{k} = [alpha, fy];
 
-        prm = fit_mf(alpha, fy); % runs actual Pacejka/Magic Formula fit with least squares to determine coeffs.
+        prm = fit_mf(alpha, fy);
         T.Fz_lbf(k) = mean(Fz_mag(sel));
         T.B(k) = prm(1);  T.C(k) = prm(2);  T.D(k) = prm(3);  T.E(k) = prm(4);
         res     = mf(prm, alpha) - fy;
-        T.R2(k) = 1 - sum(res.^2)/sum((fy - mean(fy)).^2); % standard goodness of fit calculation
-        % peak identifiable only if the curve stops rising inside the sweep
-        T.peak_in_sweep(k) = mf(prm, 12.0)/mf(prm, 10.0) <= 1.02; % checks to see if curve peak is within slip angle sweep, otherwise D is extrapolated
+        T.R2(k) = 1 - sum(res.^2)/sum((fy - mean(fy)).^2);
+        % D is a measured peak only if the curve stops rising inside the sweep
+        T.peak_in_sweep(k) = mf(prm, 12.0)/mf(prm, 10.0) <= 1.02;
 
         marker = ' ';  if ~T.peak_in_sweep(k), marker = '*'; end
         fprintf('%6.0f %7.3f %6.3f %8.1f %7.2f %8.4f %7.3f%s %8.1f\n', ...
@@ -84,12 +77,12 @@ for t = 1:numel(TIRES)
                 prm(3)/T.Fz_lbf(k), marker, prm(1)*prm(2)*prm(3));
     end
 
-    % Load dependence: Ca quadratic over all bins; mu LINEAR in load
-    % (Pacejka pDy1/pDy2 form), fitted only over bins whose peak sits
-    % inside the 12-deg sweep - D is unidentifiable when still rising
+    % Load dependence: Ca quadratic over all bins; mu linear in load (the
+    % Pacejka pDy1/pDy2 form), fitted only over bins whose peak lies inside
+    % the 12 deg sweep.
     ok  = ~isnan(T.Fz_lbf);
     n_ok = nnz(ok);
-    if n_ok < MIN_TREND_PTS % not enough valid load bins to fit mu/Ca vs load at all
+    if n_ok < MIN_TREND_PTS
         error('pacejka_fit:insufficientData', ...
               ['%s: only %d of %d load bins produced a valid fit ' ...
                '(need >=%d for the mu/Ca vs load trend). Check TTC ' ...
@@ -98,22 +91,19 @@ for t = 1:numel(TIRES)
     end
 
     idp = ok & T.peak_in_sweep;
-    used_fallback = nnz(idp) < MIN_TREND_PTS; % not enough in-sweep peaks -> fall back to all valid bins
+    used_fallback = nnz(idp) < MIN_TREND_PTS;   % too few in-sweep peaks: use all bins
     if used_fallback
         idp = ok;
     end
-    T.mu_peak    = T.D ./ T.Fz_lbf; % peak mu per load
-    T.Ca_lbf_deg = T.B .* T.C .* T.D; % cornering stiffness for every load
-    T.mu_coef    = polyfit(T.Fz_lbf(idp), T.mu_peak(idp), 1); % fits peak grip as straight line vs load
-    T.Ca_coef    = polyfit(T.Fz_lbf(ok), T.Ca_lbf_deg(ok), 2); % fits cornering stiffness as quadratic vs load
-    T.mu_coef_used_extrapolated_peaks = used_fallback; % flag for downstream/diagnostics
-    % Camber sensitivity. Separate file, separate data mask (rolling only),
-    % separate normalisation - see tire/camber_fit.m for why. It cannot change
-    % anything above it: the camber terms are RATIOS against the gamma = 0
-    % curves fitted here, so at gamma = 0 they are exactly 1.
+    T.mu_peak    = T.D ./ T.Fz_lbf;                              % peak mu per bin
+    T.Ca_lbf_deg = T.B .* T.C .* T.D;                            % cornering stiffness per bin
+    T.mu_coef    = polyfit(T.Fz_lbf(idp), T.mu_peak(idp), 1);   % mu(Fz), linear
+    T.Ca_coef    = polyfit(T.Fz_lbf(ok), T.Ca_lbf_deg(ok), 2);  % Ca(Fz), quadratic
+    T.mu_coef_used_extrapolated_peaks = used_fallback;
+    % Camber terms are ratios against these zero-camber curves (camber_fit).
     T.camber = camber_fit(data_dir, tire, true);
 
-    R.(tire) = T; % store in struct
+    R.(tire) = T;
 
     if used_fallback && any(ok & ~T.peak_in_sweep)
         fprintf(['       ! fewer than %d in-sweep peaks available - mu(Fz) trend ' ...
@@ -123,19 +113,18 @@ for t = 1:numel(TIRES)
     end
 end
 
-% Longitudinal MF fit, 18in LC0 drive/brake (torque sweeps exist at ~250 lbf
-% only). SR needs a frozen free-rolling radius: the RE channel is defined as
-% V/omega per sample, so instantaneous RE makes SR identically zero.
+% Longitudinal fit, 18in LC0 drive/brake (the only tire with torque sweeps,
+% at ~250 lbf only).
 R.long18 = fit_longitudinal(data_dir);
 
-% Mirror the design tire at top level (consumed by run_handling_targets)
+% The design tire's results also at the top level of R
 Td = R.(p.tire_data_prefix);
 for f = fieldnames(Td)'
     R.(f{1}) = Td.(f{1});
 end
 R.eval = @(alpha_deg, Fz_lbf) mf_at_load(Td, alpha_deg, Fz_lbf);
 
-% Clamp the same way mf_at_load/R.eval does, so this printed summary can
+% Summary at the design load, clamped to the tested range like R.eval
 ok_d       = ~isnan(Td.Fz_lbf);
 Fz_clamped = min(max(Fz_design, min(Td.Fz_lbf(ok_d))), max(Td.Fz_lbf(ok_d)));
 if Fz_clamped ~= Fz_design
@@ -148,13 +137,12 @@ Ca_design = polyval(R.Ca_coef, Fz_clamped);
 fprintf('\nDesign tire %s at %.0f lbf: mu_peak %.3f, Ca %.1f lbf/deg = %.0f N/rad\n', ...
         p.tire_data_prefix, Fz_clamped, polyval(R.mu_coef, Fz_clamped), ...
         Ca_design, Ca_design*LBF_DEG_TO_N_RAD);
-fprintf('Note: MF peak reads the median curve; ttc_fit 99th percentile reads the\n');
-fprintf('upper envelope. Figures: run tire_report (presentation layer).\n');
+fprintf('Note: the MF peak follows the median curve; ttc_fit''s 99th percentile reads\n');
+fprintf('the upper envelope. Figures: tire_report.\n');
 end
 
 function report_rolling_filter(tire, D, base, v_min)
-% Provenance: say how much the rolling filter removed. If this ever prints 0%
-% for a tire that used to lose half its samples, the mask has been edited.
+% Print how many samples the rolling filter removed.
 if ~isfield(D, 'V') || isempty(D.V), return; end
 would = (abs(D.FX ./ D.FZ) < 0.10) & (-D.FZ > 30) & (abs(D.IA) < 1.5) ...
         & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5.0 & abs(D.SA) < 7.0);
@@ -170,19 +158,20 @@ y  = p(3) .* sin(p(2) .* atan(Bx - p(4).*(Bx - atan(Bx))));
 end
 
 function prm = fit_mf(alpha, fy)
-% Least-squares MF fit with bounds; falls back to fminsearch w/o toolbox.
-% B = stiffness factor, C = shape factor, D = peak value, E = curvature
-% factor, a = slip angle
-D0   = max(fy); % peak value guess
-BCD0 = fy(1) / alpha(1); % estimate initial slope
-p0   = [BCD0/(1.4*D0), 1.4, D0, -0.5]; % initial guess for lsq
-lb   = [0.01, 1.0, 0.5*D0, -3.0]; % well known bounds
+% Bounded least-squares Magic Formula fit: B stiffness factor, C shape
+% factor, D peak, E curvature factor. Without the Optimization Toolbox it
+% falls back to fminsearch, which gives materially different coefficients.
+D0   = max(fy);                          % peak guess
+BCD0 = fy(1) / alpha(1);                 % initial-slope guess
+p0   = [BCD0/(1.4*D0), 1.4, D0, -0.5];
+lb   = [0.01, 1.0, 0.5*D0, -3.0];
 ub   = [2.00, 2.0, 1.5*D0,  0.99];
-% Least squares function
 if exist('lsqcurvefit', 'file')
     opt = optimoptions('lsqcurvefit', 'Display', 'off');
     prm = lsqcurvefit(@mf, p0, alpha, fy, lb, ub, opt);
 else
+    warning('pacejka_fit:noToolbox', ...
+        'lsqcurvefit not found: fminsearch fallback, results differ from the toolbox fit.');
     sse = @(q) sum((mf(min(max(q,lb),ub), alpha) - fy).^2);
     prm = fminsearch(sse, p0, optimset('Display','off'));
     prm = min(max(prm, lb), ub);
@@ -190,7 +179,8 @@ end
 end
 
 function [x, y] = binned_median_curve(sa, fy, edges, min_n)
-% Symmetrized |SA| median curve (robust to sweep artifacts/hysteresis).
+% Median Fy in each |slip| bin, after folding negative slip onto positive
+% (medians resist sweep hysteresis and junction artefacts).
 fy_odd = fy;  fy_odd(sa < 0) = -fy_odd(sa < 0);
 a = abs(sa);
 x = []; y = [];
@@ -216,10 +206,11 @@ fy = mf(prm, alpha_deg);
 end
 
 function L = fit_longitudinal(data_dir)
-% FX vs slip ratio at SA~0, 18in LC0, ~250 lbf; drive and brake fitted
-% separately (the tire is measurably asymmetric). Also estimates the
-% friction-envelope exponent n from the held-SA combined sweeps.
-channels = {'SA','FX','FY','FZ','IA','V','N','RE'};   % V: rolling filter + slip ratio
+% Fx vs slip ratio at ~0 slip angle, 18in LC0, ~250 lbf; drive and brake
+% fitted separately. Also the friction-ellipse exponent n from the held-SA
+% combined sweeps. Slip ratio uses a frozen free-rolling radius: the RE
+% channel is V/omega per sample, so using it directly makes SR zero.
+channels = {'SA','FX','FY','FZ','IA','V','N','RE'};
 files    = dir(fullfile(data_dir, 'LC0_18x60_*.mat'));
 chunks   = cell(numel(files), numel(channels));
 for i = 1:numel(files)
@@ -233,26 +224,23 @@ for c = 1:numel(channels)
 end
 
 Fz_mag = -D.FZ;
-omega  = D.N * 2*pi/60; % needs speeds because grip is a function of slip ratio not slip angle
-v_road = D.V * 0.44704;
-% V > 20 mph is redundant for this tire today (LC0_18x60 has no near-static
-% samples at all) but it is not decorative: slip ratio divides by road speed,
-% so a future data set with a creep segment would produce infinities here
-% rather than a visible error.
+omega  = D.N * 2*pi/60;                      % wheel speed [rad/s]
+v_road = D.V * vd_const().MPS_PER_MPH;       % road speed [m/s]
+% V > 20 mph also keeps slip ratio (which divides by road speed) finite.
 sel0   = (abs(D.SA) < 1.0) & (abs(D.IA) < 1.5) & (abs(Fz_mag - 250) < 35) ...
          & (D.V > 20);
 
 % Frozen free-rolling effective radius, then slip ratio
-free = sel0 & (abs(D.FX)./Fz_mag < 0.02); % define wheel radius from free roll and use as reference to calculate slip ratios
-RE0  = median(D.RE(free)) * 0.0254;
-SR   = (omega .* RE0 - v_road) ./ v_road; % slip ratio
+free = sel0 & (abs(D.FX)./Fz_mag < 0.02);   % free rolling
+RE0  = median(D.RE(free)) * vd_const().M_PER_IN;
+SR   = (omega .* RE0 - v_road) ./ v_road;    % SAE slip ratio
 
 fprintf('--- 18in LC0 longitudinal @ ~250 lbf (single-load; no torque sweeps elsewhere)\n');
 fprintf('%6s %6s %6s %8s %7s %8s %7s %9s\n', 'side','B','C','D','E','R2','mu_x','Kx/Fz');
 L = struct();
-for sides = {{'drive', +1}, {'brake', -1}} % split + and - samples into drive and brake, otherwise same logic as lateral
+for sides = {{'drive', +1}, {'brake', -1}}
     name = sides{1}{1};  sgn = sides{1}{2};
-    m  = sel0 & (sgn*SR > 0) & (abs(SR) < 0.25); % data at low SR is noise-dominated so filter
+    m  = sel0 & (sgn*SR > 0) & (abs(SR) < 0.25);
     sr = abs(SR(m));  fx = sgn * D.FX(m);
     edges = 0.004:0.008:0.20;
     xs = []; ys = [];
@@ -286,7 +274,7 @@ for sides = {{'drive', +1}, {'brake', -1}} % split + and - samples into drive an
             L.(name).mu_x, L.(name).Kx_per_Fz);
 end
 
-% Lateral reference for the mu_x/mu_y anisotropy transfer.
+% Lateral reference at 6 deg (the highest slip tested on this tire), for mu_x/mu_y.
 lat6 = (abs(D.IA) < 1.5) & (abs(Fz_mag - 250) < 35) & (abs(SR) < 0.005) ...
        & (abs(abs(D.SA) - 6) < 0.6);
 L.mu_y_at6 = median(abs(D.FY(lat6)) ./ Fz_mag(lat6));
@@ -295,9 +283,10 @@ fprintf('%6s lateral @6deg: mu_y %.3f at Fz %.0f lbf (peak not swept;', ...
         '18in', L.mu_y_at6, L.Fz_lat6);
 fprintf(' shape-corrected in build_tire_coeffs)\n');
 
-% Friction-envelope exponent from combined sweeps (held SA 3/6 deg):
-% fit |fx|^n + |fy|^n = 1 to max-over-slices, normalized by pure values.
-% LOWER-BOUND estimate (SA only tested to 6 deg); n=2 ellipse retained.
+% Friction-ellipse exponent from the combined sweeps (held SA 3 and 6 deg):
+% fit |fx|^n + |fy|^n = 1 to the 95th-percentile envelope, normalised by the
+% pure-slip values. A lower-bound estimate: slip angle is tested only to
+% 6 deg. lap_sim and ax_combined use this n.
 sel_c  = (abs(D.SA) > 2.4) & (abs(D.SA) < 6.6) & (abs(Fz_mag - 250) < 35) ...
          & (abs(D.IA) < 1.5) & (abs(SR) < 0.25);
 fy_ref = median(abs(D.FY((abs(abs(D.SA)-6) < 0.6) & (abs(Fz_mag-250) < 35) ...
@@ -316,9 +305,9 @@ for sides = {{'drive', +1}, {'brake', -1}}
             ys(end+1,1) = prctile_local(fyn(mm), 95);    %#ok<AGROW>
         end
     end
-    n_fit = fminsearch(@(n) sum(((1 - min(xs,0.999).^abs(n)).^(1/abs(n)) - ys).^2), 2.0); % friction ellipse fitting
+    n_fit = fminsearch(@(n) sum(((1 - min(xs,0.999).^abs(n)).^(1/abs(n)) - ys).^2), 2.0);
     L.(name).n_envelope = abs(n_fit);
-    fprintf('%6s combined-slip envelope n = %.2f (lower bound; model keeps n=2)\n', ...
+    fprintf('%6s combined-slip envelope n = %.2f (lower bound)\n', ...
             name, abs(n_fit));
 end
 end

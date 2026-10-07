@@ -1,6 +1,8 @@
 function ay_g = ay_limit(p, v)
-% AY_LIMIT  Lateral grip limit [g] at speed v; single source for corner_speed/lap_sim.
-% p.grip_model: 'axle' (default, load-sensitive) | 'pointmass' (comparison only).
+% AY_LIMIT  Lateral grip limit [g] at speed v. Used by corner_speed and lap_sim.
+%   ay_g = ay_limit(p, v)
+% p.grip_model: 'axle' (default, axle_grip: load transfer + load-sensitive
+% tire) or 'pointmass' (gg_envelope: constant mu, optimistic, for comparison).
 
 model = 'axle';
 if isfield(p, 'grip_model') && ~isempty(p.grip_model)

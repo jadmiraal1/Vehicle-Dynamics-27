@@ -1,14 +1,14 @@
 function out = run_stability_targets(p)
-% RUN_STABILITY_TARGETS  K under longitudinal load transfer + K(chi,ax) map.
-% Sign/trend tool. Does not set the rearward mass limit (needs combined-slip model).
+% RUN_STABILITY_TARGETS  Understeer gradient under longitudinal load transfer,
+% and the map K(front mass fraction, ax). A sign-and-trend tool: it does not
+% set the rearward mass limit, which is a limit-handling (combined-slip,
+% transient) question.
 %
-%   out = run_stability_targets()      the active car, from vd_car / cars/config_<CAR>.m
-%   out = run_stability_targets(p)     an explicit params struct - use vd_set to build a
-%                            "what if?" car - no file on disk is touched:
-%       p = vehicle_params();
-%       out = run_stability_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
+%   out = run_stability_targets()      the active car (vd_car / cars/config_<CAR>.m)
+%   out = run_stability_targets(p)     an explicit params struct; build "what if?" cars with vd_set
 
-if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
+if nargin < 1 || isempty(p), p = vehicle_params(); end
+vd_warn('reset');
 
 AX  = [-1.00 -0.50 -0.25 0 0.25 0.50];   % longitudinal accel grid [g] (- brake / + power)
 CHI = 0.38:0.02:0.54;                    % front mass fraction sweep [-]
@@ -25,33 +25,27 @@ for i = 1:numel(CHI)
     end
 end
 
-fprintf('\nSTABILITY / LOAD-TRANSFER TARGETS  (understeer gradient under long. load transfer)\n');
-fprintf('Current split %.0f%% front:  K(steady) = %+.3f deg/g  (%s)\n', ...
-        100*p.mass_dist_f, K_now, bword(K_now));
+fprintf('\nBalance under braking and power - %s  (understeer gradient K: + understeer, - oversteer)\n', p.car);
+vd_row('Understeer gradient, steady state', sprintf('%+.3f deg/g', K_now), bword(K_now));
+vd_row('Front weight fraction for neutral steer', sprintf('%.1f %%', 100*chi_ss), ...
+       sprintf('now %.0f %%', 100*p.mass_dist_f));
 
-fprintf('\nK [deg/g] vs longitudinal accel at %.0f%% front:\n', 100*p.mass_dist_f);
-fprintf('   %-9s', 'ax [g] :'); fprintf(' %+7.2f', AX); fprintf('\n');
-fprintf('   %-9s', 'K      :'); fprintf(' %+7.3f', K_ax); fprintf('\n');
-fprintf('   (braking loads the front -> K up / understeer ; power loads the rear -> K down / oversteer)\n');
+fprintf('\n  K [deg/g] at %.0f %% front weight vs longitudinal acceleration\n', 100*p.mass_dist_f);
+fprintf('    %-10s', 'accel [g]'); fprintf(' %+7.2f', AX); fprintf('\n');
+fprintf('    %-10s', 'K');         fprintf(' %+7.3f', K_ax); fprintf('\n');
+fprintf('  Braking moves load forward and adds understeer; power does the opposite.\n');
 
-fprintf('\nSteady-state neutral front mass fraction : %.1f%%  (K=0 at ax=0)\n', 100*chi_ss);
-fprintf('   -> %.0f%% front is %+.3f deg/g; reaching neutral needs %+.1f%% more front mass.\n', ...
-        100*p.mass_dist_f, K_now, 100*(chi_ss - p.mass_dist_f));
-
-fprintf('\nK(chi, ax) map [deg/g]  (+ understeer / - oversteer):\n');
-fprintf('   %-7s', 'front%'); fprintf(' %+7.2f', AX); fprintf('   <- ax [g]\n');
+fprintf('\n  K [deg/g] by front weight fraction (rows) and acceleration [g] (columns)\n');
+fprintf('    %-10s', 'front'); fprintf(' %+7.2f', AX); fprintf('\n');
 for i = 1:numel(CHI)
-    mark = ''; if abs(CHI(i)-p.mass_dist_f) < 1e-9, mark = ' <- current'; end
-    fprintf('   %5.0f%% ', 100*CHI(i)); fprintf(' %+7.3f', K_map(i,:)); fprintf('%s\n', mark);
+    mark = ''; if abs(CHI(i)-p.mass_dist_f) < 1e-9, mark = '   this car'; end
+    fprintf('    %5.0f %%   ', 100*CHI(i)); fprintf(' %+7.3f', K_map(i,:)); fprintf('%s\n', mark);
 end
 
-fprintf('\nCaveat: linear / sub-limit (~0.4 g lateral); K ill-conditioned -> sign and trend only.\n');
-fprintf('   This does not set the rearward mass limit: K is negative under power for all\n');
-fprintf('   realistic splits (normal RWD, managed by diff/throttle/LLTD, not static mass).\n');
-fprintf('   The rearward limit is a friction-circle limit effect -> needs combined-slip\n');
-fprintf('   per-axle grip (axle_grip extension), not this model. Weight distribution is a\n');
-fprintf('   traction/packaging call (rearward = faster, see run_wdist_targets); use this to\n');
-fprintf('   read off the balance cost of a chosen split, not to pick the split.\n');
+fprintf(['Assumes: linear tires (below about 0.4 g lateral), static loads plus longitudinal\n' ...
+         '         transfer; read the sign and trend, not the exact value. It does not set\n' ...
+         '         the rearmost weight split, which depends on limit and transient handling\n' ...
+         '         (see run_wdist_targets).\n']);
 
 out = struct('ax', AX, 'chi', CHI, 'K_ax', K_ax, 'K_map', K_map, ...
              'chi_neutral_ss', chi_ss, 'K_static', K_now, 'chi_current', p.mass_dist_f);
@@ -59,22 +53,22 @@ out = struct('ax', AX, 'chi', CHI, 'K_ax', K_ax, 'K_map', K_map, ...
 if vd_plots()
 try
     make_plot(p, CHI, AX, K_map, chi_ss);
-    fprintf('Plot written: plots/stability_targets.png\n');
+    fprintf('Saved plots/stability_targets.png\n');
 catch e
-    fprintf('[plot skipped: %s]\n', e.message);
+    fprintf('Plot not saved: %s\n', e.message);
 end
 end
 end
 
 function pc = set_chi(p, chi)
-% Same car at a different static front mass fraction (rebuild the derived loads
-% understeer_at reads, so the sweep is self-consistent).
-pc = vd_set(p, 'mass_dist_f', chi);   % a, b, Wf/Wr_static and Izz all follow
+% Same car at a different static front mass fraction; vd_set rebuilds a, b,
+% the static axle loads and Izz.
+pc = vd_set(p, 'mass_dist_f', chi);
 end
 
 function chi = neutral_chi(p, ax)
-% Front mass fraction giving K=0 at longitudinal accel ax. K rises monotonically
-% with front mass, so bisect. Returns the bracket end if no crossing in range.
+% Front mass fraction giving K = 0 at longitudinal accel ax. K rises with
+% front mass, so bisect; returns a bracket end if there is no crossing.
 lo = 0.30; hi = 0.70;
 if understeer_at(set_chi(p, lo), ax) > 0, chi = lo; return; end
 if understeer_at(set_chi(p, hi), ax) < 0, chi = hi; return; end
@@ -101,11 +95,11 @@ for j = 1:numel(AX)
          'Color', cols(j,:), 'DisplayName', sprintf('a_x = %+.2f g', AX(j)));
 end
 yline(axh, 0, 'k-', 'neutral', 'HandleVisibility','off', 'LabelHorizontalAlignment','left');
-xline(axh, 100*p.mass_dist_f, '--', 'current', 'HandleVisibility','off');
+xline(axh, 100*p.mass_dist_f, '--', 'this car', 'HandleVisibility','off');
 xline(axh, 100*chi_ss, ':', 'steady neutral', 'HandleVisibility','off');
 xlabel(axh, 'front mass fraction [%]');
 ylabel(axh, 'understeer gradient K [deg/g]');
-title(axh, 'Balance vs weight split & longitudinal accel  (+K understeer / -K oversteer)');
+title(axh, 'Balance vs weight split and longitudinal acceleration  (+K understeer / -K oversteer)');
 legend(axh, 'Location','northwest', 'FontSize',8);
 outdir = fullfile(vd_root(), 'plots');
 if ~exist(outdir,'dir'), mkdir(outdir); end

@@ -1,9 +1,18 @@
 function B = bicycle_model(p, Ca_axle_f, Ca_axle_r, v_sweep)
-% BICYCLE_MODEL  Linear single-track handling model.
-%   B = bicycle_model(p, Ca_f, Ca_r, v_sweep)  -> K, v_crit/char, yaw gain, yaw mode.
-% Theory: ref doc sec 10.
+% BICYCLE_MODEL  Linear single-track (bicycle) handling model.
+%   B = bicycle_model(p, Ca_axle_f, Ca_axle_r, v_sweep)
+%
+% Ca_axle_f/r are AXLE cornering stiffnesses [N/rad]. Returns:
+%   B.K_rad, B.K_deg   understeer gradient per g of lateral acceleration
+%                      (steady state: delta = L/R + K*ay/g)
+%   B.v_crit           speed where an oversteering car becomes unstable (Inf if K >= 0)
+%   B.v_char           speed of maximum yaw-rate gain for an understeering car (Inf if K <= 0)
+%   B.yaw_gain         steady-state yaw-rate gain r/delta at each v_sweep [1/s]
+%   B.tau_slow, B.zeta_eq  slowest-pole time constant [s] and equivalent damping
+%                      of the 2-state (sideslip, yaw rate) model
+% Uses static axle loads and constant stiffness: no load transfer, no
+% downforce, linear tires. Theory: VD_physics_reference.md sec 10.
 
-% --- Input validation ---
 req_fields = {'m','Izz','a','b','L','g','Wf_static','Wr_static'};
 missing = req_fields(~isfield(p, req_fields));
 assert(isempty(missing), 'bicycle_model:missing_param', ...
@@ -23,10 +32,8 @@ if B.K_rad < 0
 elseif B.K_rad > 0
     B.v_char = sqrt(p.g * p.L / B.K_rad);
 end
-% Note: if K_rad == 0 (neutral steer), both fields stay Inf -- the car is
-% linearly stable at all speeds and steering sensitivity never decays.
+% Neutral steer (K = 0) leaves both at Inf.
 
-% Response and transient sweeps
 B.v        = v_sweep;
 B.yaw_gain = v_sweep ./ (p.L + B.K_rad .* v_sweep.^2 ./ p.g);
 B.A        = @(v) yaw_plane_A(p, Ca_axle_f, Ca_axle_r, v);
@@ -42,7 +49,8 @@ end
 end
 
 function A = yaw_plane_A(p, Caf, Car, v)
-% States [beta; r]: m*v*(beta_dot + r) = Fyf + Fyr, Izz*r_dot = a*Fyf - b*Fyr
+% States [beta; r]: m*v*(beta_dot + r) = Fyf + Fyr,  Izz*r_dot = a*Fyf - b*Fyr,
+% with Fyf = -Caf*(beta + a*r/v - delta) and Fyr = -Car*(beta - b*r/v).
 A = [-(Caf + Car)/(p.m*v),        -1 + (p.b*Car - p.a*Caf)/(p.m*v^2);
      (p.b*Car - p.a*Caf)/p.Izz,   -(p.a^2*Caf + p.b^2*Car)/(p.Izz*v)];
 end

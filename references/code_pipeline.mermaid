@@ -1,83 +1,73 @@
-%% TR26 Vehicle Dynamics — code pipeline
-%% Renders natively on GitHub, or paste into https://mermaid.live
-%% Update this file when the pipeline changes: it versions with the code.
-%% Cylinders = generated files (never hand-edit). Dashed = regression guard.
+%% Vehicle dynamics toolchain - code pipeline
+%% Renders on GitHub, or paste into https://mermaid.live
+%% Cylinders = generated files (never hand-edit). Dashed = checks.
 
 flowchart TD
-    subgraph data["Measured data"]
-        TTC["TTC_Data/*.mat<br>Calspan R6 / R8 / R9"]
-        PNG["tracks/*.png<br>2026 course maps"]
-        BM["comp_benchmarks_2026.csv<br>real 2026 results"]
+    subgraph data["Inputs"]
+        TTC["TTC_Data/*.mat<br>tire test data (licensed, local only)"]
+        PNG["tracks/*.png<br>course maps (local only)"]
+        BM["organization/comp_benchmarks_2026.csv<br>real competition results"]
+        CFG["cars/config_&lt;CAR&gt;.m<br>every property of one car"]
+        RUL["util/fsae_rules.m<br>competition constants"]
     end
 
-    subgraph fit["Tire fitting (generators)"]
-        TF[ttc_fit.m]
+    subgraph fit["tire/ - fitting (needs TTC_Data)"]
         PF[pacejka_fit.m]
+        CF[camber_fit.m]
         BTC[build_tire_coeffs.m]
+        TTF["ttc_fit.m<br>screening only"]
     end
-    ART[("tire_coeffs_&lt;CAR&gt;.mat<br>generated grip artifact")]
+    ART[("tire_coeffs_&lt;CAR&gt;.mat<br>fitted tire, hash-stamped")]
 
     DIG[tracks/digitize_track.py]
     CSV[("tracks/track_*.csv<br>curvature + provenance header")]
-    LTK[load_track.m]
 
-    VP["vehicle_params.m<br>single source of truth<br>(inputs / loaded / derived)"]
+    VP["vehicle_params.m + util/vd_derive.m<br>builds p; vd_set for what-ifs"]
 
-    subgraph models["Pure models (nouns, no printing)"]
-        LT[load_transfer.m]
-        GG[gg_envelope.m]
+    subgraph models["models/ - one operating point"]
+        TIRE["mu_of_load / tire_camber / tire_forces"]
+        RL[road_loads.m]
+        AG["axle_grip.m (lateral, T1)"]
+        AXL["ax_limit.m / ax_combined.m (longitudinal, T1)"]
+        GG["gg_envelope.m (point mass, T0)"]
+        BIC["bicycle_model.m / understeer_at.m"]
+        ME[motor_eff.m]
+    end
+
+    subgraph lapsim["lapsim/ - over a lap"]
+        LT[load_track.m]
         CS[corner_speed.m]
         LS[lap_sim.m]
-        BIC[bicycle_model.m]
-        AX[axle_grip.m]
+        AT[accel_time.m]
+        DC[lap_duty_cycle.m]
     end
 
-    subgraph drivers["Target drivers (thin, print T-xxx)"]
-        R1[run_load_transfer_targets.m]
-        R2[run_gg_targets.m]
-        R3[run_handling_targets.m]
-        R4[run_lap_targets.m]
-        R5[run_energy_strategy.m]
-        R6[run_aero_targets.m]
-        R7[run_balance_targets.m]
-    end
+    TGT["targets/run_*.m<br>results + Assumes line"]
+    PTS[util/fsae_points.m]
+    PL[plots/*.png]
 
-    subgraph pres["Presentation"]
-        TR[tire_report.m]
-        LR[lap_report.m]
-        RP[lap_replay.m]
-    end
+    ST{{"tests/vd_selftest.m<br>staleness + formula recompute"}}
+    GLD{{"tests/vd_golden.m<br>every number vs baseline"}}
 
-    subgraph out["Deliverables"]
-        PL[plots/*.png]
-        CAT[VD_target_catalog.xlsx]
-        ACT[aero_component_targets.xlsx]
-    end
+    TTC --> PF & TTF
+    CF --> PF --> BTC --> ART --> VP
+    CFG --> VP
+    RUL --> VP
+    PNG --> DIG --> CSV --> LT
 
-    ST{{"tests/vd_selftest.m<br>staleness gate + formula recompute"}}
+    VP --> TIRE & RL & BIC & ME
+    TIRE --> AG & AXL & BIC
+    RL --> AG & AXL & GG & DC
+    AG --> CS --> LS
+    AXL --> LS & AT
+    GG --> AXL
+    ME --> DC --> LS
+    LT --> LS
 
-    TTC --> TF & PF
-    TF --> BTC
-    PF --> BTC
-    BTC --> ART --> VP
-    PNG --> DIG --> CSV --> LTK
+    LS & AT & AG & AXL & GG & BIC --> TGT
+    BM --> PTS --> TGT
+    TGT --> PL
 
-    VP --> LT & GG & LS & BIC & AX
-    GG --> CS --> LS
-
-    LT --> R1
-    GG --> R2
-    BIC --> R3
-    AX --> R7
-    LS --> R4 & R5 & R6
-    LTK --> R4 & R5 & R6 & LR & RP
-    BM --> R6
-    PF --> TR
-
-    R1 & R2 & R3 & R4 & R5 & R6 & R7 --> PL
-    R1 & R2 & R3 & R4 & R5 & R6 & R7 -.-> CAT
-    R6 --> ACT
-    TR & LR & RP --> PL
-
-    ST -. guards .-> ART
-    ST -. guards .-> VP
+    ST -. checks .-> ART
+    ST -. checks .-> VP
+    GLD -. checks .-> TGT

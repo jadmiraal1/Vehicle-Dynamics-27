@@ -1,72 +1,67 @@
 function out = run_camber_targets(p)
-% RUN_CAMBER_TARGETS  What camber is worth, on this tire, at this car's loads.
+% RUN_CAMBER_TARGETS  What camber is worth on this tire at this car's loads.
 %
 %   out = run_camber_targets()     the active car (vd_car / cars/config_<CAR>.m)
 %   out = run_camber_targets(p)    an explicit params struct (build it with vd_set)
 %
-% Issues the camber targets the suspension subteam needs: how much camber the
-% outside wheel should see at the cornering limit, and what it costs or buys.
-%
-% HOW TO READ THIS
-% ---------------
-% Camber does three things at once and they fight (tire/camber_fit.m explains
-% each). The sweep below is the only honest way to ask which one wins, because
-% the answer depends on load and this car's outer tire is heavily loaded.
-%
-% The sweep applies camber the way a real suspension does: the OUTSIDE wheel
-% gets the helpful lean (+gamma) and the INSIDE wheel, on the same links, gets
-% the opposite (-gamma). Reporting only the outside wheel would flatter camber.
+% Camber changes peak grip, cornering stiffness and camber thrust at once
+% (tire/camber_fit.m), and the net effect depends on tire load, so it is
+% swept through the axle model. The sweep applies camber as a suspension
+% does: the OUTSIDE wheel gets the helpful lean (+gamma) and the INSIDE
+% wheel the opposite (-gamma).
 
 if nargin < 1 || isempty(p), p = vehicle_params(); end
+vd_warn('reset');
 
-R_SKID   = 9.125;                 % [m] FSAE skidpad path radius
+R_SKID   = fsae_rules().skidpad_R_m;   % [m] skidpad path radius
 V_CORNER = 15;                    % [m/s] speed the sweep is evaluated at
 GAM      = 0:0.5:4;               % [deg] camber magnitude on the outside wheel
 
 if ~isfield(p, 'camber_status') || ~strcmp(p.camber_status, 'ok')
-    fprintf(2, ['\nCAMBER TARGETS: the tire artifact has no camber fit ' ...
-                '(%s).\nRun build_tire_coeffs, then re-run this.\n'], ...
-            ternary_local(isfield(p,'camber_status'), '', 'field missing'));
+    fprintf(2, '\nCamber: the tire file has no camber fit. Run build_tire_coeffs, then re-run this.\n');
     out = struct('status', 'no camber data');
     return
 end
 
 % --- 1. the tire on its own, at the loads this car actually puts on it ----
 G0        = axle_grip(vd_set(p, 'camber_deg', zeroc()), V_CORNER);
-Fz_out_f  = G0.Fz.fo / 4.44822;   % [lbf] outer front tire at the limit
-Fz_out_r  = G0.Fz.ro / 4.44822;
-Fz_in_f   = G0.Fz.fi / 4.44822;
+N_PER_LBF = vd_const().N_PER_LBF;
+Fz_out_f  = G0.Fz.fo / N_PER_LBF;   % [lbf] outer front tire at the limit
+Fz_out_r  = G0.Fz.ro / N_PER_LBF;
+Fz_in_f   = G0.Fz.fi / N_PER_LBF;
 
-fprintf('\nCAMBER TARGETS  (tire %s, %s)\n', p.tire_id, p.camber_basis);
-fprintf('Camber fit box: |gamma| <= %.0f deg, %.0f-%.0f lbf.\n', ...
-        p.camber_gamma_max_deg, p.camber_Fz_min_lbf, p.camber_Fz_max_lbf);
-fprintf('At the limit this car loads its tires to %.0f lbf (front outer) / %.0f lbf (rear outer),\n', ...
-        Fz_out_f, Fz_out_r);
-fprintf('and unloads the inner front to %.0f lbf.%s\n', Fz_in_f, ...
-        ternary_local(max(Fz_out_f, Fz_out_r) > p.camber_Fz_max_lbf, ...
-        ' The outer tire is BEYOND the fitted load range - camber terms are clamped at the edge.', ''));
+fprintf('\nCamber - %s  (tire %s)\n', p.car, p.tire_id);
+fprintf('  Tire loads at the cornering limit (%.0f m/s): outer front %.0f lbf, outer rear %.0f lbf,\n', ...
+        V_CORNER, Fz_out_f, Fz_out_r);
+fprintf('  inner front %.0f lbf. Camber data covers 0-%.0f deg and %.0f-%.0f lbf', ...
+        Fz_in_f, p.camber_gamma_max_deg, p.camber_Fz_min_lbf, p.camber_Fz_max_lbf);
+if max(Fz_out_f, Fz_out_r) > p.camber_Fz_max_lbf
+    fprintf(';\n  above %.0f lbf the camber effect is held at its %.0f lbf value.\n', ...
+            p.camber_Fz_max_lbf, p.camber_Fz_max_lbf);
+else
+    fprintf('.\n');
+end
 
-% The tire on its own, at both ends of the fitted box plus the load that
-% actually matters. The sign convention is doing real work here: +gamma is the
-% outside wheel (leaning into the corner), -gamma is the inside wheel on the
-% same suspension setting.
-fprintf('\n%-8s | %-21s | %-21s | %9s %10s\n', '', 'peak factor, OUTSIDE', 'peak factor, INSIDE', 'stiff x', 'thrust');
-fprintf('%-8s | %10s %10s | %10s %10s | %9s %10s\n', 'gamma', ...
+% The tire alone: +gamma is the outside wheel, -gamma the inside wheel on the
+% same suspension setting, at the light edge of the fit and at the outer
+% front tire's load.
+fprintf('\n  Peak-grip factor from camber (1.000 = no change)\n');
+fprintf('    %-8s %-21s %-21s %-10s %s\n', 'camber', 'outside wheel', 'inside wheel', 'stiffness', 'thrust');
+fprintf('    %-8s %-10s %-10s %-10s %-10s %-10s %s\n', '[deg]', ...
         sprintf('%.0f lbf', p.camber_Fz_min_lbf), sprintf('%.0f lbf', Fz_out_f), ...
         sprintf('%.0f lbf', p.camber_Fz_min_lbf), sprintf('%.0f lbf', Fz_out_f), ...
-        '[-]', '[deg slip]');
+        'factor', '[deg slip]');
 for g = [1 2 3 4]
     fD_o_lo = tire_camber(p, p.camber_Fz_min_lbf, +g);
     fD_o_hi = tire_camber(p, Fz_out_f,            +g);
     fD_i_lo = tire_camber(p, p.camber_Fz_min_lbf, -g);
     fD_i_hi = tire_camber(p, Fz_out_f,            -g);
     [~, fC, dSH] = tire_camber(p, Fz_out_f, +g);
-    fprintf('%-8.1f | %10.3f %10.3f | %10.3f %10.3f | %9.3f %10.2f\n', ...
+    fprintf('    %-8.1f %-10.3f %-10.3f %-10.3f %-10.3f %-10.3f %.2f\n', ...
             g, fD_o_lo, fD_o_hi, fD_i_lo, fD_i_hi, fC, dSH);
 end
-fprintf(['Read the two peak columns together: camber pays on a LIGHTLY loaded tire\n' ...
-         'and charges on a heavily loaded one, and at the cornering limit this car\n' ...
-         'puts almost all of its load on the tire that is being charged.\n']);
+fprintf(['  On this tire camber helps a lightly loaded tire and costs a heavily loaded\n' ...
+         '  one, and at the cornering limit most of the load is on the outside tire.\n']);
 
 % --- 2. the car: lateral limit vs camber ---------------------------------
 ay   = zeros(size(GAM));
@@ -81,47 +76,39 @@ end
 [ay_best, ib] = max(ay);
 gam_best      = GAM(ib);
 
-fprintf('\nLateral limit at %.0f m/s (outside +gamma, inside -gamma, both axles)\n', V_CORNER);
-fprintf('%-8s %10s %10s\n', 'gamma', 'ay [g]', 'vs 0 deg');
+fprintf('\n  Lateral limit at %.0f m/s vs camber (outside wheel leaning in, inside wheel out)\n', V_CORNER);
+fprintf('    %-8s %-12s %s\n', '[deg]', 'lateral [g]', 'change');
 for i = 1:2:numel(GAM)
-    fprintf('%-8.1f %10.3f %+9.2f%%\n', GAM(i), ay(i), 100*(ay(i)/ay(1) - 1));
+    fprintf('    %-8.1f %-12.3f %+.2f %%\n', GAM(i), ay(i), 100*(ay(i)/ay(1) - 1));
 end
-
-fprintf('\nT-CAM  best outside-wheel camber : %+.1f deg  (ay %.3f g, %+.2f%% vs zero camber)\n', ...
-        gam_best, ay_best, 100*(ay_best/ay(1) - 1));
-fprintf('T-CAMS camber sensitivity        : %+.4f g per deg near the optimum\n', ...
-        local_slope(GAM, ay, gam_best));
+fprintf('\n');
+vd_row('Best camber, both axles', sprintf('%+.1f deg', gam_best), ...
+       sprintf('%.3f g, %+.2f %%', ay_best, 100*(ay_best/ay(1) - 1)));
+vd_row('Lateral limit change per deg near best', ...
+       sprintf('%+.4f g/deg', local_slope(GAM, ay, gam_best)));
 
 % --- 3. balance: camber is a balance knob, not only a grip knob ----------
-% Front-only and rear-only camber move the limiting axle. That is the lever the
-% suspension team actually has, because front and rear camber gain are set
-% independently.
+% Front-only and rear-only camber shift the limit between axles; front and
+% rear camber are set independently.
 lim0 = axle_grip(vd_set(p, 'camber_deg', zeroc()), V_CORNER).limiting;
 lim2 = axle_grip(vd_set(p, 'camber_deg', bothc(2, 0)), V_CORNER).limiting;
-fprintf('T-CAMB balance                   : limiting axle %s at 0 deg -> %s with 2 deg front only\n', ...
-        lim0, lim2);
-fprintf('       front-only 2 deg: ay %+.2f%%   rear-only 2 deg: ay %+.2f%%\n', ...
-        100*(interp1(GAM, ay_f, 2)/ay(1) - 1), 100*(interp1(GAM, ay_r, 2)/ay(1) - 1));
+vd_row('Axle that saturates first, 0 / 2 deg front', sprintf('%s / %s', lim0, lim2));
+vd_row('Lateral limit, 2 deg front only', ...
+       sprintf('%+.2f %%', 100*(interp1(GAM, ay_f, 2)/ay(1) - 1)));
+vd_row('Lateral limit, 2 deg rear only', ...
+       sprintf('%+.2f %%', 100*(interp1(GAM, ay_r, 2)/ay(1) - 1)));
 
 % --- 4. skidpad ----------------------------------------------------------
 v_skid = @(a) sqrt(a * p.g * R_SKID);
 t_skid = @(a) 2*pi*R_SKID / v_skid(a);
-fprintf('T-CAMK skidpad                   : %.3f s at 0 deg -> %.3f s at %+.1f deg (%+.3f s)\n', ...
-        t_skid(ay(1)), t_skid(ay_best), gam_best, t_skid(ay_best) - t_skid(ay(1)));
+vd_row('Skidpad lap time at best camber', sprintf('%.3f s', t_skid(ay_best)), ...
+       sprintf('%+.3f s vs 0 deg', t_skid(ay_best) - t_skid(ay(1))));
 
-% --- caveats -------------------------------------------------------------
-fprintf(['\nWhat this study CANNOT see: the thrust column is a slip-angle offset, so\n' ...
-         'camber still adds force BELOW the peak - that is turn-in response and\n' ...
-         'steering feel, and a steady-state limit model gives it no credit. Read\n' ...
-         'the ay numbers as "what camber costs at the limit", not "camber is bad".\n']);
-fprintf(['Caveat: quasi-static axle model, camber is an INPUT (no suspension\n' ...
-         '        kinematics yet - nothing here knows your camber gain). Camber\n' ...
-         '        terms fitted from TTC belt data with NO negative-inclination\n' ...
-         '        sweep: the adverse branch assumes a symmetric tire. Camber and\n' ...
-         '        test order are collinear in the TTC run structure, so a slow\n' ...
-         '        test-order drift would land inside these coefficients.\n' ...
-         '        Directional until checked on track. lambda_Ca=%.2f, mu_derate=%.2f prov.\n'], ...
-        p.lambda_Ca, p.mu_derate);
+fprintf(['Assumes: steady-state axle model with camber as an input (no suspension\n' ...
+         '         kinematics). Camber terms come from TTC data with no negative-inclination\n' ...
+         '         sweep, so the tire is assumed symmetric, and camber is confounded with\n' ...
+         '         test order. Not credited: camber thrust below the grip limit (turn-in\n' ...
+         '         response), so read these as what camber costs at the limit.\n']);
 
 out.gamma_deg     = GAM;
 out.ay_g          = ay;
@@ -137,9 +124,9 @@ out.beyond_fit_box = max(Fz_out_f, Fz_out_r) > p.camber_Fz_max_lbf;
 if vd_plots()
 try
     make_plot(p, GAM, ay, ay_f, ay_r);
-    fprintf('Plot written: camber_targets.png\n');
+    fprintf('Saved plots/camber_targets.png\n');
 catch e
-    fprintf('[plot skipped: %s]\n', e.message);
+    fprintf('Plot not saved: %s\n', e.message);
 end
 end
 end
@@ -150,8 +137,7 @@ c = struct('fo', 0, 'fi', 0, 'ro', 0, 'ri', 0);
 end
 
 function c = bothc(gf, gr)
-% Outside wheel gets the helpful lean, inside wheel the opposite - one
-% suspension setting, two different tires.
+% Outside wheel +gamma, inside wheel -gamma (one suspension setting).
 c = struct('fo', +gf, 'fi', -gf, 'ro', +gr, 'ri', -gr);
 end
 
@@ -161,10 +147,6 @@ function s = local_slope(x, y, x0)
 lo = max(1, i-1);  hi = min(numel(x), i+1);
 if hi == lo, s = 0; return; end
 s = (y(hi) - y(lo)) / (x(hi) - x(lo));
-end
-
-function s = ternary_local(c, a, b)
-if c, s = a; else, s = b; end
 end
 
 function make_plot(p, GAM, ay, ay_f, ay_r)

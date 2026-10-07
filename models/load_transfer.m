@@ -1,6 +1,10 @@
 function LT = load_transfer(p, ay, ax)
-% LOAD_TRANSFER  Quasi-static load transfer; ay, ax in [g] (+ax accel).
-% Lateral split by p.LLTD per axle track (matches axle_grip); longitudinal by h/L.
+% LOAD_TRANSFER  Quasi-static load transfer. ay, ax in [g]; ax > 0 accelerating.
+%   LT = load_transfer(p, ay, ax)
+%
+% Rigid body: longitudinal transfer m*ax*h_cg/L; lateral transfer m*ay*h_cg
+% split between axles by p.LLTD (the same split axle_grip uses). Static axle
+% loads only - no downforce.
 ay = ay * p.g;
 ax = ax * p.g;
 

@@ -1,90 +1,110 @@
 function out = run_lap_targets(p)
-% RUN_LAP_TARGETS  Lap-derived targets: lap times, mass sensitivity, accel.
+% RUN_LAP_TARGETS  Lap-simulation targets: 75 m, skidpad, top speed, lap times,
+% endurance energy and mass sensitivity.
 %
-%   out = run_lap_targets()      the active car, from vd_car / cars/config_<CAR>.m
-%   out = run_lap_targets(p)     an explicit params struct - use vd_set to build a
-%                            "what if?" car - no file on disk is touched:
-%       p = vehicle_params();
-%       out = run_lap_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
+%   out = run_lap_targets()      the active car (vd_car / cars/config_<CAR>.m)
+%   out = run_lap_targets(p)     an explicit params struct, e.g. a "what if?":
+%       out = run_lap_targets(vd_set(vehicle_params(), 'm_car', 240, 'ClA', 4.0));
+%
+% Tracks are read from tracks/track_<name>.csv. A closed track (endurance)
+% is simulated as a flying lap; an open one (autocross) from rest at the
+% start line. Theory: VD_physics_reference.md sec 7.
 
-if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
+if nargin < 1 || isempty(p), p = vehicle_params(); end
+vd_warn('reset');
 here = vd_root();
+R    = fsae_rules();
+k    = vd_const();
 
-fprintf('\nCONCEPT-TIER LAP-SIM TARGETS  (%s, %s, v_max %.1f m/s = %.0f mph)\n', ...
-        p.tire_id, p.drive, p.v_max, p.v_max*2.237);
+% 75 m acceleration, from rest at the line
+[t_acc, v_end] = accel_time(p, R.accel_m);
 
-% --- T-ACC2 : 75 m acceleration (open, from rest) ---
-s = linspace(0, 75, 751)';
-[va, t_acc] = lap_sim(p, s, zeros(size(s)), 0, false);
-fprintf('\n[T-ACC2 ] 75 m ACCELERATION : %.2f s  (v_end %.1f m/s, rev-limited)\n', t_acc, va(end));
+% Skidpad: steady state, axle model
+vsk = corner_speed(p, 1/R.skidpad_R_m);
 
-% --- T-SKID2 : skidpad (steady) ---
-R = 9.125;  vsk = corner_speed(p, 1/R);
-fprintf('[T-SKID2] SKIDPAD          : %.2f g, %.2f s  (R=%.2f m)\n', vsk^2/(R*p.g), 2*pi*R/vsk, R);
-
-% --- T-VMAX : top speed ---
-fprintf('[T-VMAX ] TOP SPEED        : %.1f m/s (%.0f mph) rev limit @ %d rpm\n', ...
-        p.v_max, p.v_max*2.237, p.rpm_motor_max);
-
-% --- T-LAP : lap times on available tracks ---
+% Lap time and mass sensitivity per track
 out.laps = struct();
-tracks = {'autocross','endurance'};
-ran_any = false;  lap_s = [];  lap_k = [];
+out.dtdm = struct();
+rows  = {};                                   % printed after the header
+saved = {};                                   % plot files written
+tracks = {'autocross', 'endurance'};
+have = cellfun(@(n) isfile(fullfile(here, 'tracks', ['track_' n '.csv'])), tracks);
+if ~any(have), tracks = {'representative'}; end   % synthetic fallback loop
 for i = 1:numel(tracks)
     f = fullfile(here, 'tracks', ['track_' tracks{i} '.csv']);
-    if isfile(f)
-        [s, k, xt, yt] = load_track(f);
-        [vl, tl, E] = lap_sim(p, s, k, [], true);
-        save_lap_map(here, tracks{i}, xt, yt, vl, tl);
-        fprintf('[T-LAP  ] %-10s lap : %.2f s  (%.0f m, v_avg %.1f, v_max %.1f m/s)\n', ...
-                tracks{i}, tl, s(end), s(end)/tl, max(vl));
-        out.laps.(tracks{i}) = tl;  ran_any = true;
-        if isempty(lap_s), lap_s = s; lap_k = k; end
-    end
-end
-if ~ran_any
-    f = fullfile(here, 'tracks', 'track_representative.csv');
-    if isfile(f)
-        [s, k, xt, yt] = load_track(f);
-        [vl, tl, E] = lap_sim(p, s, k, [], true);
-        save_lap_map(here, 'representative', xt, yt, vl, tl);
-        fprintf('[T-LAP  ] representative lap : %.2f s  (%.0f m loop) — digitize real maps to replace\n', tl, s(end));
-        out.laps.representative = tl;  lap_s = s;  lap_k = k;
-    else
-        fprintf('[T-LAP  ] no track CSV found — run the Python digitizer first.\n');
-    end
+    if ~isfile(f), continue; end
+    [s, kap, xt, yt, prov] = load_track(f);
+    [vl, tl] = run_track(p, s, kap, prov);
+    p2 = vd_set(p, 'm_car', p.m_car + 10);          % +10 kg; derived values follow
+    [~, tl2] = run_track(p2, s, kap, prov);
+    dtdm = (tl2 - tl) / 10;
+    saved{end+1} = save_lap_map(here, tracks{i}, xt, yt, vl, tl); %#ok<AGROW>
+    name = [upper(tracks{i}(1)) tracks{i}(2:end)];
+    rows(end+1, :) = {sprintf('%s %s time', name, ternary(prov.closed, 'lap', 'run')), ...
+                      sprintf('%.2f s', tl), ...
+                      sprintf('%.0f m, average %.1f m/s', s(end), s(end)/tl)}; %#ok<AGROW>
+    rows(end+1, :) = {sprintf('%s time per added kg', name), ...
+                      sprintf('%.1f ms/kg', dtdm*1000), ''}; %#ok<AGROW>
+    out.laps.(tracks{i}) = tl;
+    out.dtdm.(tracks{i}) = dtdm;
 end
 
-% --- T-NRG : energy per lap (drive at accumulator; regen upper bound) ---
-if exist('E', 'var')
-    laps_22km = 22000 / lap_s(end);
-    fprintf('[T-NRG  ] ENERGY/LAP       : %.0f Wh drawn (%.0f Wh at wheel), %.0f Wh braking (regen bound)\n', ...
-            E.drive_acc_Wh, E.drive_wheel_Wh, E.brake_wheel_Wh);
-    fprintf('          endurance ~22 km : %.1f kWh no-regen (%.0f laps of this layout)\n', ...
-            E.drive_acc_Wh*laps_22km/1000, laps_22km);
+% Endurance energy drawn from the pack (braking energy = regen upper bound)
+f = fullfile(here, 'tracks', 'track_endurance.csv');
+if isfile(f)
+    [s, kap] = load_track(f);
+    [~, ~, E] = lap_sim(p, s, kap, [], true);
+    laps = p.scenario.endurance_m / s(end);
     out.E_lap = E;
+    out.E_endurance_kWh = E.drive_acc_Wh*laps/1000;
 end
 
-% --- T-MS3 : full-lap mass sensitivity ---
-if ~isempty(lap_s)
-    [~, t0] = lap_sim(p, lap_s, lap_k, [], true);
-    % +10 kg on the car (identical to the old p.m + 10, since m = m_car +
-    % m_driver), but now k_rot, Izz, axle loads and Fz_design_lbf follow too.
-    p2 = vd_set(p, 'm_car', p.m_car + 10);
-    [~, t1] = lap_sim(p2, lap_s, lap_k, [], true);
-    dtdm = (t1 - t0)/10;
-    fprintf('[T-MS3  ] mass sensitivity : %.1f ms/kg over the lap (%.4f s/kg)\n', dtdm*1000, dtdm);
-    out.dtdm_lap = dtdm;
+out.t_acc = t_acc;  out.v_skid_g = vsk^2/(R.skidpad_R_m*p.g);
+out.t_skid = 2*pi*R.skidpad_R_m/vsk;  out.v_max = p.v_max;
+
+fprintf('\nLap simulation - %s  (%s, %s, top speed %.1f m/s)\n', ...
+        p.car, p.tire_id, p.drive, p.v_max);
+vd_row(sprintf('%.0f m acceleration time', R.accel_m), sprintf('%.2f s', t_acc), ...
+       sprintf('ends at %.1f m/s%s', v_end, ternary(v_end >= p.v_max - 1e-9, ', rev limit', '')));
+vd_row('Skidpad lap time', sprintf('%.2f s', out.t_skid), sprintf('%.2f g', out.v_skid_g));
+vd_row(sprintf('Top speed (rev limit %d rpm)', p.rpm_motor_max), sprintf('%.1f m/s', p.v_max), ...
+       sprintf('%.0f mph', p.v_max*k.MPH_PER_MPS));
+for i = 1:size(rows, 1)
+    vd_row(rows{i, :});
+end
+if isempty(fieldnames(out.laps))
+    fprintf('  No track files found in tracks/ - run tracks/digitize_track.py first.\n');
+end
+if isfield(out, 'E_lap')
+    vd_row('Energy per endurance lap, from the pack', sprintf('%.0f Wh', E.drive_acc_Wh), ...
+           sprintf('%.0f Wh at the wheels', E.drive_wheel_Wh));
+    vd_row('Braking energy per lap (regen upper bound)', sprintf('%.0f Wh', E.brake_wheel_Wh));
+    vd_row(sprintf('Endurance energy, %.0f km at full power', p.scenario.endurance_m/1000), ...
+           sprintf('%.1f kWh', out.E_endurance_kWh), sprintf('%.1f laps, no regen', laps));
+end
+fprintf(['Assumes: point mass on the track centreline (no yaw dynamics, no racing line)\n' ...
+         '         with limits from the axle models; starts from rest at the line.\n' ...
+         '         Provisional: tire grip scale %.2f, launch traction and efficiencies.\n' ...
+         '         Calibrate against skidpad and acceleration data.\n'], p.mu_derate);
+for i = 1:numel(saved)
+    if ~isempty(saved{i}), fprintf('%s\n', saved{i}); end
+end
+fprintf('Animate a lap: lap_replay(''track_endurance.csv'')\n');
 end
 
-out.t_acc = t_acc;  out.v_skid_g = vsk^2/(R*p.g);  out.t_skid = 2*pi*R/vsk;  out.v_max = p.v_max;
-fprintf('Caveats: point mass (no balance/per-wheel transfer), centreline racing\n');
-fprintf('line, mu derated %.2f, k_trac/eta provisional. Calibrate vs skidpad in Fall.\n', p.mu_derate);
-fprintf('Animate any lap with lap_replay(''track_<name>.csv'').\n\n');
+function [v, t] = run_track(p, s, kap, prov)
+% Closed track: flying lap. Open track: from rest at the start line.
+if prov.closed
+    [v, t] = lap_sim(p, s, kap, [], true);
+else
+    [v, t] = lap_sim(p, s, kap, 0, false);
+end
 end
 
-function save_lap_map(here, name, x, y, v, t_lap)
-% Speed-colored track map: visual check that the right course loaded.
+function msg = save_lap_map(here, name, x, y, v, t_lap)
+% Speed-coloured track map: a visual check that the right course loaded.
+% Returns the line to print ('' when plotting is off).
+msg = '';
 if ~vd_plots(), return; end
 try
     outdir = fullfile(here, 'plots');
@@ -95,10 +115,14 @@ try
     axis equal; grid on;
     cb = colorbar; cb.Label.String = 'speed [m/s]';
     xlabel('x [m]'); ylabel('y [m]');
-    title(sprintf('%s lap: %.2f s (square = start/finish)', name, t_lap));
+    title(sprintf('%s: %.2f s (square = start)', name, t_lap));
     saveas(f, fullfile(outdir, ['lap_map_' name '.png'])); close(f);
-    fprintf('          map: plots/lap_map_%s.png\n', name);
+    msg = sprintf('Saved plots/lap_map_%s.png', name);
 catch e
-    fprintf('          [map skipped: %s]\n', e.message);
+    msg = sprintf('Plot not saved (%s map): %s', name, e.message);
 end
+end
+
+function s = ternary(c, a, b)
+if c, s = a; else, s = b; end
 end

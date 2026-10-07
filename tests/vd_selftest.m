@@ -1,37 +1,33 @@
 function pass = vd_selftest()
-% VD_SELFTEST  Regression self-check: artifact staleness, formula wiring, data anchors.
-% Run after any edit. addpath tests, run from repo root.
+% VD_SELFTEST  Self-check: tire-artifact staleness, formula wiring, data anchors.
+%   pass = vd_selftest()      run after any edit (after vd_setup)
+%
+% Layer 0  the tire artifact matches its inputs (hash, tire identity, mass)
+% Layer 1  formulas recomputed independently match what the code returns
+% Layer 2  physical invariants and data anchors, with tolerances
+% Errors on any failure. Draws no figures.
 
 fprintf('\n================= VD SELF-TEST =================\n');
 
 here  = fileparts(fileparts(mfilename('fullpath')));   % repo root (tests/ is below)
 nfail = 0;
 
-% No figure may appear, and none may be left open. This suite runs targets, and
-% targets draw. Interactively that used to leave one window behind; in CI a
-% suite that pops windows is a suite nobody can run in a loop.
+% No figures: hide them and switch drawing off (restored on exit or error).
 fig0 = get(0, 'DefaultFigureVisible');
 set(0, 'DefaultFigureVisible', 'off');
 restore_fig = onCleanup(@() set(0, 'DefaultFigureVisible', fig0));
 
-% And do not DRAW at all. Rendering and writing PNGs was most of the wall-clock
-% cost of this suite and none of it is what the suite checks. onCleanup so an
-% error mid-run cannot leave plotting off for the rest of the session.
 plots0 = vd_plots(false);
 restore_plots = onCleanup(@() vd_plots(plots0));
 t_start = tic;
 
-% Is the licensed TTC data present? It is gitignored - this repo is public and
-% the data is not redistributable - so a CI clone will not have it. Everything
-% downstream of the tire artifact still runs, because the artifact IS tracked.
-% Absent means ZERO .mat files: a PARTIAL data folder must still fail the hash
-% gate below rather than quietly downgrade to CI mode.
+% The licensed TTC data is gitignored, so CI runs without it. "Absent" means
+% zero .mat files: a partial data folder still goes through the hash check.
 n_ttc   = numel(dir(fullfile(here, 'TTC_Data', '*.mat')));
 has_ttc = n_ttc > 0;
 
 % ---------------------------------------------------------------- layer 0
-% The staleness gate. The generated-artifact pattern is only safe if something
-% screams when the artifact and its inputs diverge.
+% The tire artifact is generated; refuse it if its inputs have changed.
 fprintf('\n-- artifact integrity --\n');
 car = vd_car();
 art = fullfile(here, ['tire_coeffs_' car '.mat']);
@@ -47,35 +43,48 @@ end
 fprintf('%-32s %s\n', 'active car', car);
 
 if ~has_ttc
-    % Do NOT compare hashes here. tire_src_files globs TTC_Data/*.mat, so with
-    % no data the input list is a different list and the hash would differ for
-    % a reason that says nothing about staleness. Reporting a SKIP is honest;
-    % comparing anyway and failing would train everyone to ignore a red gate,
-    % and quietly passing would be worse still.
+    % Without the data the hashed file list is different, so the hash cannot
+    % be compared. Report a SKIP rather than a false pass or fail.
     fprintf('%-32s %s\n', 'tire artifact fresh (hash)', 'SKIP - no TTC_Data');
     fprintf(2, ['  ! TTC_Data/ is absent, so the staleness gate is NOT covered by ' ...
                 'this run.\n    Nothing here can tell you the artifact matches the ' ...
                 'fit code. Run the\n    full suite locally (data present) before ' ...
                 'trusting a tire change.\n']);
 end
-want = vd_hash(tire_src_files(here));
+want = vd_hash(tire_src_files());
 if ~isfield(T, 'src_hash'), stored = '(none)'; else, stored = T.src_hash; end
 if has_ttc && ~strcmp(stored, want)
     fprintf(2, ['\n*** Stale tire artifact ***\n' ...
         'The tire artifact was built from different inputs than are on disk.\n' ...
         '  stored: %s\n  actual: %s\n' ...
-        'The tire fit code, the promotion math, or the TTC data changed since\n' ...
-        'the last build, so the car is running on grip that no longer matches.\n\n' ...
+        'The tire fit code, the TTC data or the car mass changed since the last\n' ...
+        'build, so the car is running on grip that no longer matches.\n\n' ...
         'Run:  build_tire_coeffs\n' ...
-        'Then re-issue the grip-derived targets (#8 #12 #13 #48 #49 #61-65)\n' ...
-        'before handing any of them to another subteam.\n\n'], stored, want);
+        'Then vd_golden, to see which results moved before you share any of them.\n\n'], stored, want);
     error('vd_selftest:staleArtifact', 'tire_coeffs_%s.mat is stale.', car);
 end
 if has_ttc
     fprintf('%-32s %s\n', 'tire artifact fresh (hash)', 'PASS');
 end
 
-% The hash covers the fit code + TTC data, but not vehicle_params.m -- and
+% The hash covers the fit code and the TTC data, not the car config. Check
+% the two config facts the artifact depends on directly: tire identity here,
+% the design load below.
+cfg_now = feval(['config_' car]);
+for fld = {'tire_id', 'tire_data_prefix'}
+    if ~isfield(T, fld{1})
+        error('vd_selftest:noTireId', ...
+            'The tire artifact does not record %s. Run:  build_tire_coeffs', fld{1});
+    end
+    if ~strcmp(T.(fld{1}), cfg_now.(fld{1}))
+        error('vd_selftest:wrongTire', ...
+            ['The artifact was built for %s = "%s" but cars/config_%s.m now ' ...
+             'says "%s".\nThe grip in p describes a different tire.\n' ...
+             'Run:  build_tire_coeffs'], fld{1}, T.(fld{1}), car, cfg_now.(fld{1}));
+    end
+end
+fprintf('%-32s %s\n', 'tire identity matches config', 'PASS');
+
 p0 = vehicle_params();
 if ~isfield(T, 'Fz_design_lbf')
     fprintf(2, 'The tire artifact predates the Fz_design check. Run build_tire_coeffs.\n');
@@ -89,14 +98,13 @@ if dFz > 1e-6 * max(1, T.Fz_design_lbf)
         '  params now give   : %.2f lbf/corner  (m = %.2f kg)\n' ...
         'Tire mu is read at the design load and falls with load, so the stored\n' ...
         'grip no longer describes this car.\n\n' ...
-        'Run:  build_tire_coeffs      then re-issue the grip targets.\n\n'], ...
+        'Run:  build_tire_coeffs, then vd_selftest and vd_golden again.\n\n'], ...
         T.Fz_design_lbf, p0.Fz_design_lbf, p0.m);
     error('vd_selftest:designLoadMoved', 'design corner load != artifact.');
 end
 fprintf('%-32s PASS  (%.1f lbf/corner)\n', 'design load matches artifact', T.Fz_design_lbf);
 
-% Grip must be loaded, never a literal. Catches a future edit that re-introduces
-% `p.mu_y_raw = 2.34;` into the parameter file.
+% Grip must come from the artifact, never be typed into vehicle_params.m.
 src  = fileread(fullfile(here, 'vehicle_params.m'));
 body = regexprep(src, '%[^\n]*', '');            % strip comments first
 bad  = {};
@@ -118,9 +126,8 @@ fprintf('%-32s INFO  (%s)\n', 'grip basis', T.basis);
 % ---------------------------------------------------------------- layer 1
 p = vehicle_params();
 
-% Wiring guard (root cause of the silent-circle bug): the friction-ellipse
-% exponents must actually reach p, or lap_sim's ellipse_exp falls back to n=2
-% (a circle) with no error. Fail with a clear message if either is missing.
+% The measured friction-ellipse exponents must reach p; otherwise lap_sim
+% quietly falls back to n = 2 (a circle).
 for fld = {'n_env_drive','n_env_brake'}
     if ~isfield(p, fld{1}) || ~isfinite(p.(fld{1}))
         error('vd_selftest:ellipseExpUnwired', ...
@@ -144,11 +151,7 @@ g12  = gg_envelope(p, 12);
 p_pm = p;  p_pm.grip_model = 'pointmass';   % same car, point-mass lateral limit
 p_lm = p;  p_lm.long_model = 'pointmass';   % same car, point-mass longitudinal edges
 
-% --- camber: the reduction case and a live case --------------------------
-% The reduction case is the important one. A term that is switched off must
-% change NOTHING - not "almost nothing". If these drift apart, the camber
-% factors have leaked into the zero-camber path and every previously issued
-% grip target silently moved.
+% --- camber: zero camber must reproduce the no-camber model exactly -------
 cam0  = struct('fo', 0, 'fi', 0, 'ro', 0, 'ri', 0);
 cam2  = struct('fo', 2, 'fi', -2, 'ro', 2, 'ri', -2);
 p_c0  = vd_set(p, 'camber_deg', cam0);
@@ -159,6 +162,15 @@ Fz_t  = 200;                                  % a load inside the fitted box
 TF0   = tire_forces(p, Fz_t, [], 0);
 a_swp = 0:0.1:25;
 TFc   = tire_forces(p, Fz_t, a_swp, 0);
+RL20  = road_loads(p, 20);
+
+% --- lap solver: curvature sign must not matter; two 75 m integrators agree
+s_t = (0:1:120)';  k_t = zeros(size(s_t));  k_t(40:80) = 1/15;
+[~, t_left]  = lap_sim(p, s_t,  k_t, 0, false);
+[~, t_right] = lap_sim(p, s_t, -k_t, 0, false);
+s75 = (0:0.1:fsae_rules().accel_m)';
+[~, t75_lap] = lap_sim(p, s75, zeros(size(s75)), 0, false);
+t75_acc = accel_time(p);
 
 C = {
   'mu_y = raw * derate',       p.mu_y,            p.mu_y_raw * p.mu_derate
@@ -194,6 +206,9 @@ C = {
   'tire_forces Ca == artifact',TF0.Ca_lbf_deg,               polyval(p.Ca_coef, Fz_t)*p.lambda_Ca
   'tire_forces curve peak = D',max(TFc.Fy_lbf),              TF0.Fy_max_lbf
   'schema version == 2',       p.tire_schema_version,        2
+  'axle loads sum to N',       RL20.Nf + RL20.Nr,            RL20.N
+  'rear load: weight + CoP',   RL20.Nr,                      (1-p.mass_dist_f)*p.m*p.g + (1-p.aero_df_front)*RL20.DF
+  'lap_sim: left == right',    t_left,                       t_right
 };
 
 fprintf('\n-- formula wiring --\n');
@@ -207,7 +222,7 @@ end
 
 % ---------------------------------------------------------------- layer 2
 fprintf('\n-- data anchors --\n');
-% Two kinds of check here:
+% (1) raw-data anchors (need TTC data), (2) physical invariants with tolerances.
 inr = @(x,lo,hi) double(x >= lo & x <= hi);
 A = {};
 if has_ttc
@@ -216,9 +231,7 @@ if has_ttc
 end
 A = [A; {
   % (2) physical invariants
-  % Upper bound raised from 2.6 to 2.7 in Sep 2026: the rolling-only fit moved
-  % the design tire from 2.383 to 2.481 and this band exists to catch a units
-  % slip, not to pin the value.
+  % wide band: catches a units slip, does not pin the value
   'mu_y_raw in [2.0,2.7]',     inr(p.mu_y_raw, 2.0, 2.7),        1, 0.5
   'anisotropy in [0.90,1.10]', inr(p.mu_anisotropy, 0.90, 1.10), 1, 0.5
   'axle ay in (0.85,1.0)*mu_y',inr(G12.ay_lim_g, 0.85*p.mu_y, p.mu_y), 1, 0.5
@@ -232,6 +245,7 @@ A = [A; {
   'combined falls with ay',    double(ax_combined(p,12,0.8*G12.ay_lim_g,'accel') < ax_combined(p,12,0,'accel')), 1, 0.5
   'motor map 96% island',      inr(motor_eff(2500,110), 0.945, 0.965), 1, 0.5
   'motor map high-torque band',inr(motor_eff(2500,220), 0.925, 0.945), 1, 0.5
+  'accel_time ~ lap_sim 75 m', t75_acc,                  t75_lap, 0.01
   % wiring / regression locks (tautological against the artifact, tight)
   'mu_of_load @edge cont.',    mu_of_load(p, p.Fz_fit_max), polyval(p.mu_coef, p.Fz_fit_max)*p.mu_derate, 1e-9
   'mu_of_load outer=artifact', mu_of_load(p, T.Fz_outer_limit_lbf), T.mu_outer_central, 1e-6
@@ -256,7 +270,7 @@ for i = 1:size(A,1)
             sprintf('%.3f+/-%.3f', wantv, tol), tern(ok,'PASS','FAIL'));
 end
 
-close all;                       % leave no windows behind, ever
+close all;
 
 pass    = (nfail == 0);
 nchecks = size(C,1) + size(A,1) + 2;
@@ -270,25 +284,12 @@ end
 end
 
 function v = second_out(f)
-% Grab the 2nd output of a multi-output call from inside a table literal.
+% Second output of f(), for use inside the table literals above.
 [~, v] = f();
 end
 
 function v = third_out(f)
 [~, ~, v] = f();
-end
-
-function files = tire_src_files(here)
-% must match build_tire_coeffs/tire_src_files exactly, or every run reads
-files = {fullfile(here, 'tire', 'pacejka_fit.m'), ...
-         fullfile(here, 'tire', 'ttc_fit.m'), ...
-         fullfile(here, 'tire', 'camber_fit.m'), ...
-         fullfile(here, 'tire', 'build_tire_coeffs.m')};
-d = dir(fullfile(here, 'TTC_Data', '*.mat'));
-for i = 1:numel(d)
-    if contains(d(i).name, 'raw'), continue; end     % raw files are not read
-    files{end+1} = fullfile(here, 'TTC_Data', d(i).name); %#ok<AGROW>
-end
 end
 
 function s = tern(c,a,b)

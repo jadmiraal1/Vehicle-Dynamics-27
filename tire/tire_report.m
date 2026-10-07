@@ -1,10 +1,15 @@
 function tire_report(p)
-% TIRE_REPORT  Presentation figures for the tire fits -> plots/.
+% TIRE_REPORT  Figures of the tire fits -> plots/ (needs TTC_Data/).
 %
 %   tire_report()      the active car
 %   tire_report(p)     an explicit params struct (see vd_set)
+%
+% Presentation only: it re-runs pacejka_fit and plots the fits, the
+% aligning moment, load sensitivity, the high-load extrapolation, the
+% anisotropy correction and the tire's vertical stiffness. Nothing here
+% feeds the models.
 
-if nargin < 1 || isempty(p), p = vehicle_params(); end   % no p = the active car
+if nargin < 1 || isempty(p), p = vehicle_params(); end
 evalc('R = pacejka_fit();');
 TIRES  = {'LC0_16x75','R20_16x75','R20_18x60','GY_18x65'};
 tire_c = [0.00 0.45 0.70; 0.90 0.62 0.00; 0.00 0.62 0.45; 0.84 0.37 0.00];
@@ -32,7 +37,7 @@ for t = 1:4
 end
 legend(findobj(subplot(2,2,1), 'Type', 'line', '-not', 'Marker', 'o'), ...
        'Location', 'southeast', 'FontSize', 8);
-sgtitle('Magic Formula pure-lateral fits — TTC R8/R9, IA<1.5\circ, 10–12 psi', 'FontWeight', 'bold');
+sgtitle('Magic Formula pure-lateral fits — TTC R8/R9, IA<1.5\circ, 9–13 psi, rolling', 'FontWeight', 'bold');
 save_fig(f, fullfile(outdir, 'tire_curves.png'));
 
 % Fig 2: 3D blanket, design tire (fit interpolated across load)
@@ -71,7 +76,7 @@ D = load_with_mz(fullfile(vd_root(), 'TTC_Data'), ...
                  [p.tire_data_prefix '_*.mat']);
 Fz_mag = -D.FZ;
 base = (abs(D.FX./D.FZ) < 0.10) & (Fz_mag > 30) & (abs(D.IA) < 1.5) ...
-       & (D.P > 9) & (D.P < 13) & ~((D.SA > 5) & (D.SA < 7));
+       & (D.P > 9) & (D.P < 13) & ~(abs(D.SA) > 5 & abs(D.SA) < 7) & (D.V > 20);   % as pacejka_fit
 f = new_fig([100 60 1000 420]);
 ax1 = subplot(1,2,1); hold on; style(ax1);
 ax2 = subplot(1,2,2); hold on; style(ax2);
@@ -263,7 +268,7 @@ for t = 1:4
                        [TIRES{t} '_*.mat']);
     Fz_mag_t = -Dt.FZ;
     base_t = (abs(Dt.FX./Dt.FZ) < 0.10) & (Fz_mag_t > 30) & (abs(Dt.IA) < 1.5) ...
-             & (Dt.P > 9) & (Dt.P < 13) & ~((Dt.SA > 5) & (Dt.SA < 7));
+             & (Dt.P > 9) & (Dt.P < 13) & ~(abs(Dt.SA) > 5 & abs(Dt.SA) < 7) & (Dt.V > 20);
     sel_t = base_t & (abs(Fz_mag_t - REP_LOAD) < REP_LOAD*0.15);
     if nnz(sel_t) < 3000, continue; end   % same density floor as Fig 3
     [xs, mz] = odd_bins(Dt.SA(sel_t),  Dt.MZ(sel_t));
@@ -309,7 +314,7 @@ sgtitle('Anisotropy shape correction — 18in LC0 peak back-derived from its 6de
 save_fig(f, fullfile(outdir, 'tire_anisotropy_shape.png'));
 
 % Fig 10: vertical stiffness + loaded radius (design tire, RL channel).
-% Source of tracker #67: k_t from the Fz-vs-RL slope; loaded radii at the
+% Vertical stiffness k_t from the Fz-vs-RL slope; loaded radii at the
 % static per-tire loads from vehicle_params (so they track the car).
 Dr = load_rl(fullfile(vd_root(), 'TTC_Data'), [p.tire_data_prefix '_*.mat']);
 Fz10  = -Dr.FZ;
@@ -318,7 +323,7 @@ keep  = abs(Dr.SA) < 1 & abs(Dr.IA) < 1.5 & Dr.P > 9 & Dr.P < 13 & Fz10 > 100 ..
 Fz10 = Fz10(keep);  RL10 = Dr.RL(keep);
 c10  = polyfit(RL10, Fz10, 1);                     % Fz [lbf] vs RL [in]
 k_t  = -c10(1);                                    % [lbf/in]
-N_PER_LBF = 4.44822;
+N_PER_LBF = vd_const().N_PER_LBF;
 Fzq  = [p.Wf_static/2, p.m*p.g/4, p.Wr_static/2] / N_PER_LBF;   % front / design / rear [lbf]
 RLq  = (Fzq - c10(2)) / c10(1);
 f = new_fig([90 90 900 620]);
@@ -327,7 +332,7 @@ scatter(ax, Fz10(1:25:end), RL10(1:25:end), 6, [0.7 0.7 0.7], 'filled', ...
         'MarkerFaceAlpha', 0.4, 'HandleVisibility', 'off');
 Fline = linspace(min(Fz10), max(Fz10), 50);
 plot(ax, Fline, (Fline - c10(2))/c10(1), '-', 'Color', tire_c(1,:), 'LineWidth', 2, ...
-     'DisplayName', sprintf('linear fit: k_t = %.0f lbf/in (%.0f N/mm)', k_t, k_t*N_PER_LBF/25.4));
+     'DisplayName', sprintf('linear fit: k_t = %.0f lbf/in (%.0f N/mm)', k_t, k_t*N_PER_LBF/vd_const().MM_PER_IN));
 mk = {'^','o','s'}; lb = {'front static','design load','rear static'};
 for q = 1:3
     plot(ax, Fzq(q), RLq(q), mk{q}, 'MarkerSize', 9, 'MarkerFaceColor', [0.84 0.37 0], ...
@@ -341,7 +346,7 @@ title(ax, sprintf('%s vertical stiffness and loaded radius (10 psi, low slip/cam
       strrep(p.tire_data_prefix,'_','\_')));
 save_fig(f, fullfile(outdir, 'tire_radius.png'));
 
-fprintf('tire_report: 10 figures written to plots/\n');
+fprintf('Saved 10 tire figures to plots/ (tire_*.png)\n');
 end
 
 function D = load_rl(data_dir, pattern)
@@ -391,7 +396,7 @@ end
 end
 
 function D = load_with_mz(data_dir, pattern)
-channels = {'SA','FY','FX','FZ','IA','P','MZ'};
+channels = {'SA','FY','FX','FZ','IA','P','MZ','V'};
 files = dir(fullfile(data_dir, pattern));
 chunks = cell(numel(files), numel(channels));
 for i = 1:numel(files)

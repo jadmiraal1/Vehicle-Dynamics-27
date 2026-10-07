@@ -1,54 +1,29 @@
 function varargout = vd_golden(mode, tol)
-% VD_GOLDEN  Every number this toolchain issues, in one committed text file.
+% VD_GOLDEN  Every number the toolchain produces, compared with a committed baseline.
 %
 %   vd_golden()          compare against the baseline; error if anything moved
-%   vd_golden('bless')   regenerate the baseline - a deliberate act, see below
+%   vd_golden('bless')   rewrite the baseline (a deliberate act, see below)
 %   vd_golden('show')    print the current values, compare nothing
 %   vd_golden(mode, tol) relative tolerance (default 1e-6)
 %
-% ---------------------------------------------------------------------------
-% WHAT THIS IS FOR
-% ---------------------------------------------------------------------------
-% vd_selftest answers "is the physics still wired up correctly?" - it checks
-% relationships. This answers a different and blunter question: "did ANY number
-% this repo produces change, and by how much?"
+% vd_selftest checks relationships ("is the physics wired up correctly?").
+% This asks a blunter question: did ANY number change, and by how much? It
+% runs every run_* target and a set of model probes, flattens the results to
+% name/value pairs and compares them with tests/refs/golden_<CAR>.tsv - a
+% sorted text file, so a pull-request diff shows which value moved.
 %
-% It runs every run_* target and every core model probe, flattens the results
-% into name/value pairs, and writes them to a TAB-SEPARATED TEXT file under
-% tests/refs/. Text, not .mat, and sorted by name, for one reason: when a
-% change moves a number, the pull request DIFF SHOWS YOU WHICH ONE AND BY HOW
-% MUCH. A binary reference file would just say "reference changed".
+% A failure is not a bug report; it says a number moved. Workflow:
+%   1. make the change
+%   2. vd_golden                -> lists exactly what moved
+%   3. read the list: every line should be a change you meant to make
+%   4. vd_golden('bless')       -> rewrite the baseline
+%   5. commit the code and tests/refs/golden_<CAR>.tsv together
+% Blessing without reading the list defeats the purpose.
 %
-% That property is the whole point. It is what lets you accept a change quickly
-% ("moved nothing") or interrogate it ("moved skidpad by 0.4%, why?") without
-% re-deriving anything, and it is what makes it safe to let someone - or
-% something - propose changes faster than you can read them line by line.
-%
-% ---------------------------------------------------------------------------
-% BLESSING
-% ---------------------------------------------------------------------------
-% A failure here is NOT a bug report. It says a number moved. Sometimes that is
-% the point of the change. The workflow is:
-%
-%   1. make your change
-%   2. run vd_golden        -> it lists exactly what moved
-%   3. READ THE LIST. Every line should be a change you meant to make.
-%   4. vd_golden('bless')   -> rewrite the baseline
-%   5. commit the code AND tests/refs/golden_<CAR>.tsv in the same commit
-%
-% Step 3 is the only step that matters. Blessing without reading turns this
-% file into a rubber stamp, which is worse than not having it - it will make
-% you confident about a change nobody checked.
-%
-% ---------------------------------------------------------------------------
-% WHAT IS NOT IN HERE
-% ---------------------------------------------------------------------------
-% Nothing that needs TTC_Data. The data is licensed and gitignored, so a CI
-% clone does not have it, and a baseline that only some machines can reproduce
-% is worse than no baseline. So: no ttc_fit, no pacejka_fit, no camber_fit, no
-% aligning_moment. Those are covered by vd_selftest's hash gate when you run it
-% locally with the data present. Everything downstream of the tire artifact IS
-% covered, because the artifact itself is tracked.
+% Not covered: anything that needs TTC_Data (ttc_fit, pacejka_fit,
+% camber_fit, aligning_moment). Those are checked by vd_selftest's hash gate
+% on a machine with the data. Everything downstream of the committed tire
+% artifact is covered.
 
 if nargin < 1 || isempty(mode), mode = 'check'; end
 if nargin < 2 || isempty(tol),  tol  = 1e-6;    end
@@ -60,8 +35,7 @@ here = fileparts(fileparts(mfilename('fullpath')));
 car  = vd_car();
 ref  = fullfile(here, 'tests', 'refs', ['golden_' car '.tsv']);
 
-% Targets draw. This one runs EVERY target, so the rendering cost is the single
-% largest thing it would otherwise do - and it checks numbers, not pictures.
+% Numbers only: switch figures off for the run and restore afterwards.
 fig0 = get(0, 'DefaultFigureVisible');
 set(0, 'DefaultFigureVisible', 'off');
 restore_fig = onCleanup(@() set(0, 'DefaultFigureVisible', fig0));
@@ -76,9 +50,7 @@ t0 = tic;
 close all;
 fprintf('collected %d values in %.1f s\n', size(G,1), toc(t0));
 
-% A target that will not run is a failure in its own right, and it must not be
-% able to hide as an "added value" in the diff below - nor be blessed into the
-% baseline, which would bake the breakage in.
+% A target that fails to run is a failure, and must never be blessed in.
 if ~isempty(broken)
     error('vd_golden:targetFailed', ...
         ['%d target(s) could not run: %s\nFix them before blessing or ' ...
@@ -154,8 +126,7 @@ end
 
 % =========================================================================
 function [G, broken] = collect(car)
-% Every number, in one place. Add probes here as the toolchain grows; a new
-% row is free coverage and shows up in the next diff as ADDED.
+% Every number, in one place. A new probe shows up in the next diff as ADDED.
 p = vehicle_params();
 R = {};
 broken = {};
@@ -205,7 +176,7 @@ for ax = [-1.0 -0.5 0 0.5]
     R = addv(R, sprintf('understeer.Car.ax%+.1f', ax), info.Ca_r);
 end
 R = addv(R, 'corner_speed.0',  corner_speed(p, 0));
-R = addv(R, 'corner_speed.9',  corner_speed(p, 1/9.125));
+R = addv(R, 'corner_speed.9',  corner_speed(p, 1/fsae_rules().skidpad_R_m));
 
 % --- camber wired through the car ----------------------------------------
 for g = [0 2 4]
@@ -214,13 +185,13 @@ for g = [0 2 4]
 end
 
 % --- every target ---------------------------------------------------------
-% aligning_moment and params_report are deliberately absent: the first needs
-% TTC_Data, the second writes a spreadsheet and computes nothing new.
+% Not listed: aligning_moment (needs TTC_Data) and params_report (writes a
+% spreadsheet, computes nothing new).
 TARGETS = {'run_load_transfer_targets','run_gg_targets','run_lap_targets', ...
            'run_handling_targets','run_stability_targets','run_balance_targets', ...
            'run_wdist_targets','run_aero_targets','run_energy_strategy', ...
            'run_gear_targets','run_pack_targets','run_camber_targets', ...
-           'run_aero_gear_sensitivity'};
+           'run_aero_gear_sensitivity','run_cooling_targets'};
 for i = 1:numel(TARGETS)
     name = TARGETS{i};
     try
@@ -228,8 +199,7 @@ for i = 1:numel(TARGETS)
         evalc(sprintf('out = %s(p);', name));
         R = flatten(R, ['target.' name], out);
     catch e
-        % A target that cannot run is a failure, but a LOUD one - record it as
-        % a value so the diff shows the day it broke instead of a silent gap.
+        % Record the failure loudly; the caller refuses to compare or bless.
         fprintf(2, '  ! %s errored: %s\n', name, e.message);
         broken{end+1} = name; %#ok<AGROW>
     end
@@ -248,9 +218,8 @@ end
 end
 
 function R = addv(R, name, v)
-% One value in, one or more rows out. Long vectors are summarised rather than
-% expanded: a 300-point lap trace as 300 rows would drown the diff, and its
-% min/max/mean move whenever the trace does.
+% One value in, one or more rows out. Vectors longer than 12 are summarised
+% (n, min, max, mean) so a lap trace does not drown the diff.
 if islogical(v), v = double(v); end
 if ~isnumeric(v) || isempty(v), return; end
 v = v(:);
@@ -274,8 +243,7 @@ end
 end
 
 function R = flatten(R, prefix, S)
-% Walk a target's out struct. Text, cells and handles are skipped on purpose -
-% this file is for NUMBERS. Doc and wiring text is checked by tests/ci_checks.py.
+% Walk a target's out struct; text, cells and handles are skipped.
 if isnumeric(S) || islogical(S)
     R = addv(R, prefix, S);  return
 end

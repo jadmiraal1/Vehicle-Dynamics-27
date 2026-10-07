@@ -4,34 +4,25 @@ function p = vd_set(p, varargin)
 %   p2 = vd_set(p, 'ClA', 4.0, 'CdA', 1.63, 'mass_dist_f', 0.47)
 %   p2 = vd_set(p, struct('gear_ratio', 3.6))
 %
-% This is the "what if?" function, and it is the one you want in a sweep:
+% Use it for every "what if?" and in every sweep:
 %
 %     for chi = 0.38:0.02:0.52
-%         q = vd_set(p, 'mass_dist_f', chi);     % <- derived values follow
+%         q = vd_set(p, 'mass_dist_f', chi);     % derived values follow
 %         ay(end+1) = ay_limit(q, 12);
 %     end
 %
-% Compare the old way, which appeared in six studies with six different sets of
-% omissions:
+% Assigning a field directly (q = p; q.mass_dist_f = chi) leaves a, b, the
+% axle loads, Izz etc. describing the old car. Structs are copied by value,
+% so p itself is never changed.
 %
-%     q = p;  q.mass_dist_f = chi;
-%     q.a = q.L*(1-chi);  q.b = q.L*chi;          % remembered
-%     q.Wf_static = q.m*q.g*chi;  ...             % remembered
-%     % Izz, k_rot, Fz_design_lbf                 % silently now WRONG
-%
-% MATLAB structs are copied by value, so p is untouched; you get a new struct
-% back. That is what makes the sweep above safe.
-%
-% GUARD RAILS
-% Setting a DERIVED field is refused, because vd_derive would immediately
-% overwrite it and you would be debugging a value that never took effect. If
-% you want a heavier car, set m_car - not m.
+% Setting a DERIVED field is refused (vd_derive would overwrite it): to make
+% the car heavier, set m_car, not m. Unknown field names are refused too.
 %
 % See also VD_DERIVE, VEHICLE_PARAMS.
 
 DERIVED = {'m','mu_x_raw','mu_y','mu_x','a','b','Wf_static','Wr_static', ...
            'm_unsprung','m_unsprung_f','m_unsprung_r','m_sprung', ...
-           'k_rot','Izz','P_max','v_max','Fz_design_lbf'};
+           'k_rot','Izz','P_max','v_max','Fz_design_lbf','N_PER_LBF'};
 
 % Accept either name/value pairs or a single struct of overrides.
 if numel(varargin) == 1 && isstruct(varargin{1})

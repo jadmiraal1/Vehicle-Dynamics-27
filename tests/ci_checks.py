@@ -3,17 +3,9 @@
 
 Run:  python3 tests/ci_checks.py          (from the repo root)
 
-WHY THIS EXISTS
----------------
-Most of what has gone wrong in this repo was not a wrong equation. It was two
-copies of the same fact drifting apart: a doc describing a previous version of
-the code, a constant with two homes, a helper duplicated with the SAME NAME and
-OPPOSITE meaning in two files. None of that needs MATLAB to catch, and none of
-it needs the licensed TTC data - which is why these checks run in seconds on
-every push while the MATLAB job is still installing.
-
-Each check below corresponds to a specific thing that has actually drifted.
-Adding a check is cheap; do it the next time you find a duplicate by hand.
+Each check guards against two copies of the same fact drifting apart: docs
+vs code, a constant with two homes, a helper defined twice. They run in
+seconds on every push. Add a check whenever you find a duplicate by hand.
 
 Exit code 0 = all pass, 1 = something drifted.
 """
@@ -60,7 +52,7 @@ def all_m_files():
 
 # --------------------------------------------------------------------------
 def check_targets_in_readme():
-    """README promises a table of every target. It has been missing three."""
+    """Every targets/run_*.m appears in the README script table."""
     readme = read("README.md")
     for n in listdir("targets", ".m"):
         stem = n[:-2]
@@ -73,25 +65,38 @@ def check_targets_in_readme():
 
 
 def check_caveat_lines():
-    """README: 'Every script prints a caveat line.' Make that mechanically true."""
+    """Every run_* target prints an 'Assumes:' line."""
     for n in listdir("targets", ".m"):
         if not n.startswith("run_"):
             continue
         src = read(f"targets/{n}")
         printed = [l for l in src.splitlines()
-                   if "fprintf" in l and "caveat" in l.lower()]
+                   if "fprintf" in l and "Assumes:" in l]
         if not printed:
-            fail("caveat-line",
-                 f"targets/{n} never prints a line containing 'Caveat'. Every "
-                 f"issued number needs its warning label - that is what you say "
-                 f"when someone asks how sure you are.")
+            fail("assumes-line",
+                 f"targets/{n} never prints a line starting 'Assumes:'. Every "
+                 f"result needs a statement of what it assumes.")
+
+
+def check_no_tracker_ids():
+    """No internal tracker references (T-CGH, #41, ...) in code or docs."""
+    t_code = re.compile(r"\bT-[A-Z]{2,}[0-9]*\b")
+    hash_n = re.compile(r"(?<![\w&])#[0-9]+\b")
+    files = all_m_files() + ["README.md", "CONTRIBUTING.md", "docs/STATUS.md",
+                             "tests/refs/README.md", "references/code_pipeline.mermaid"]
+    for rel in files:
+        if not exists(rel):
+            continue
+        for i, line in enumerate(read(rel).splitlines(), 1):
+            m = t_code.search(line) or hash_n.search(line)
+            if m:
+                fail("tracker-id",
+                     f"{rel}:{i} refers to '{m.group(0)}', an internal tracker item. "
+                     f"Describe the quantity in words instead.")
 
 
 def check_artifact_filename():
-    """The artifact has been tire_coeffs_<CAR>.mat since the cars/ refactor.
-
-    A bare 'tire_coeffs.mat' in an error message sends a stuck newcomer to ls
-    for a file that does not exist."""
+    """The artifact is tire_coeffs_<CAR>.mat; no file may name 'tire_coeffs.mat'."""
     pat = re.compile(r"tire_coeffs\.mat")
     for rel in all_m_files() + ["README.md", "references/code_pipeline.mermaid"]:
         if not exists(rel):
@@ -104,36 +109,47 @@ def check_artifact_filename():
 
 
 def check_tire_src_files_agree():
-    """The staleness gate's input list lives in TWO files.
-
-    build_tire_coeffs.m and vd_selftest.m each define a local tire_src_files().
-    They take 'here' with OPPOSITE meanings (tire/ vs repo root) and are kept in
-    sync by a comment. If they ever disagree, the gate silently stops covering a
-    file and nothing says so."""
-    def names(rel):
-        src = read(rel)
-        m = re.search(r"function files = tire_src_files\(here\)(.*?)\nend",
-                      src, re.S)
-        if not m:
-            fail("tire-src-files", f"{rel} has no tire_src_files() to compare.")
-            return None
-        return sorted(set(re.findall(r"'([A-Za-z0-9_]+\.m)'", m.group(1))))
-
-    a = names("tire/build_tire_coeffs.m")
-    b = names("tests/vd_selftest.m")
-    if a is None or b is None:
-        return
-    if a != b:
+    """The staleness check's input list is defined once, in tire/tire_src_files.m."""
+    defs = []
+    for rel in all_m_files():
+        for i, line in enumerate(read(rel).splitlines(), 1):
+            if re.match(r"\s*function\s+.*\btire_src_files\s*\(", line):
+                defs.append(f"{rel}:{i}")
+    if defs != ["tire/tire_src_files.m:1"]:
         fail("tire-src-files",
-             "tire_src_files() lists different files in build_tire_coeffs.m "
-             f"({a}) and vd_selftest.m ({b}). The staleness gate is only as "
-             "good as the shorter list.")
+             "tire_src_files() must be defined exactly once, in "
+             f"tire/tire_src_files.m. Found: {defs or 'nowhere'}.")
+
+
+def check_no_bare_lbf_constant():
+    """The lbf conversion lives only in util/vd_const.m (hot loops use p.N_PER_LBF)."""
+    for rel in all_m_files():
+        if rel.endswith("vd_const.m"):
+            continue
+        for i, line in enumerate(read(rel).splitlines(), 1):
+            if "4.44822" in line:
+                fail("lbf-constant",
+                     f"{rel}:{i} writes 4.44822 out by hand. Use vd_const(), "
+                     f"or p.N_PER_LBF if it is in a hot loop.")
+
+
+def check_one_accel_integrator():
+    """One 75 m integrator: lapsim/accel_time.m."""
+    hits = []
+    for rel in all_m_files():
+        if rel == "lapsim/accel_time.m":
+            continue
+        for i, line in enumerate(read(rel).splitlines(), 1):
+            if re.match(r"\s*function\s+.*\b(accel_time|accel_event)\s*\(", line):
+                hits.append(f"{rel}:{i}")
+    if hits:
+        fail("accel-integrator",
+             "the 75 m accel integrator lives in lapsim/accel_time.m only. "
+             f"Found another definition at: {', '.join(hits)}.")
 
 
 def check_schema_version_agrees():
-    """vehicle_params refuses an artifact of the wrong schema. The number it
-    expects and the number build_tire_coeffs stamps must match, or a fresh
-    clone cannot load its own committed artifact."""
+    """The schema version vehicle_params expects equals the one build_tire_coeffs writes."""
     vp = read("vehicle_params.m")
     bt = read("tire/build_tire_coeffs.m")
     a = re.search(r"SCHEMA_EXPECTED\s*=\s*(\d+)", vp)
@@ -149,8 +165,7 @@ def check_schema_version_agrees():
 
 
 def check_function_names():
-    """A MATLAB file whose function name differs from its filename is callable
-    only by the filename - the mismatch is invisible until someone reads it."""
+    """Each MATLAB file's function name matches its file name."""
     decl = re.compile(
         r"^\s*function\s+(?:\[[^\]]*\]\s*=\s*|[A-Za-z_]\w*\s*=\s*)?"
         r"([A-Za-z_]\w*)\s*(?:\(|$)")
@@ -166,7 +181,7 @@ def check_function_names():
 
 
 def check_python_requirements():
-    """README says MATLAB is the only requirement. digitize_track.py disagrees."""
+    """Python code in tracks/ declares its dependencies."""
     pys = [n for n in listdir("tracks", ".py")]
     if pys and not exists("tracks/requirements.txt"):
         fail("python-requirements",
@@ -175,10 +190,7 @@ def check_python_requirements():
 
 
 def check_golden_covers_targets():
-    """Coverage rots quietly: a new target gets written and nothing tests it.
-
-    vd_golden lists the targets it runs. Every run_* must be in that list or in
-    the explicit exclusion note beside it."""
+    """Every run_* target is in vd_golden's TARGETS list or its exclusion note."""
     if not exists("tests/vd_golden.m"):
         NOTES.append("tests/vd_golden.m absent - skipping coverage check.")
         return
@@ -200,8 +212,7 @@ def check_golden_covers_targets():
 
 
 def check_readme_points_at_cars():
-    """The pre-refactor README told people to edit the one file whose header
-    says 'never edit this file'."""
+    """The README points newcomers at cars/ and vd_car, not vehicle_params.m."""
     readme = read("README.md")
     if "cars/" not in readme or "vd_car" not in readme:
         fail("readme-cars",
@@ -209,12 +220,46 @@ def check_readme_points_at_cars():
              "following it will edit vehicle_params.m, find no m_car, and stop.")
 
 
+def check_no_bare_rule_constants():
+    """Competition constants live only in util/fsae_rules.m."""
+    pats = [r"(?<![\d.])9\.125(?![\d])", r"(?<![\w.])80e3(?![\w])"]
+    for rel in all_m_files():
+        if rel.endswith("fsae_rules.m"):
+            continue
+        for i, line in enumerate(read(rel).splitlines(), 1):
+            code = line.split("%", 1)[0]
+            for pat in pats:
+                if re.search(pat, code):
+                    fail("rule-constant",
+                         f"{rel}:{i} writes a competition constant by hand. "
+                         f"Use fsae_rules().")
+
+
+def check_staleness_list_readable():
+    """ci_staleness.py can read the hashed-source list (else that check is off)."""
+    path = os.path.join(ROOT, "tire", "tire_src_files.m")
+    if not os.path.exists(path):
+        fail("staleness-list", "tire/tire_src_files.m is missing.")
+        return
+    names = re.findall(r"fullfile\(root,\s*'tire',\s*'([A-Za-z0-9_]+\.m)'\)", read("tire/tire_src_files.m"))
+    if not names:
+        fail("staleness-list",
+             "tests/ci_staleness.py cannot find the tire/*.m entries in "
+             "tire/tire_src_files.m, so the CI staleness check would be off. "
+             "Keep the fullfile(root, 'tire', 'name.m') form or update both files.")
+
+
 # --------------------------------------------------------------------------
 CHECKS = [
     ("targets listed in README", check_targets_in_readme),
-    ("every target prints a caveat", check_caveat_lines),
+    ("every target states its assumptions", check_caveat_lines),
+    ("no internal tracker references", check_no_tracker_ids),
     ("artifact filename is current", check_artifact_filename),
-    ("staleness gate input lists agree", check_tire_src_files_agree),
+    ("staleness gate has one input list", check_tire_src_files_agree),
+    ("lbf conversion has one home", check_no_bare_lbf_constant),
+    ("one 75 m accel integrator", check_one_accel_integrator),
+    ("rule constants have one home", check_no_bare_rule_constants),
+    ("staleness list is readable", check_staleness_list_readable),
     ("artifact schema versions agree", check_schema_version_agrees),
     ("function name == filename", check_function_names),
     ("python deps declared", check_python_requirements),

@@ -1,110 +1,109 @@
 function out = params_report(p)
-% PARAMS_REPORT  One-page summary of vehicle_params -> console/plots.
+% PARAMS_REPORT  Every parameter of the active car, with its value, where it
+% comes from and its note -> organization/vehicle_params_report_<CAR>.xlsx
 %
-%   out = params_report()      the active car, from vd_car / cars/config_<CAR>.m
-%   out = params_report(p)     an explicit params struct - use vd_set to build a
-%                            "what if?" car - no file on disk is touched:
-%       p = vehicle_params();
-%       out = params_report(vd_set(p, 'm_car', 240, 'ClA', 4.0));
+%   out = params_report()      the active car (vd_car / cars/config_<CAR>.m)
+%   out = params_report(p)     an explicit params struct; build "what if?" cars with vd_set
+%
+% Source column:
+%   config     cars/config_<CAR>.m      (measured or decided about the car)
+%   universal  vehicle_params.m         (constants, scenario, model switches)
+%   artifact   tire_coeffs_<CAR>.mat    (fitted from tire data)
+%   derived    util/vd_derive.m         (arithmetic on the above)
+% Notes are the end-of-line comments in those files; a note containing
+% PROVISIONAL, [verify] or MEASURE is flagged in the 'status' column.
+% The spreadsheet is generated - edit the source files, then re-run.
 
-if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
+if nargin < 1 || isempty(p), p = vehicle_params(); end
 here = vd_root();
 
-% Parse the SOURCE for tier banners and provenance comments; values come
-% from the evaluated struct so derived numbers are real numbers.
-src   = fileread(fullfile(here, 'vehicle_params.m'));
-lines = regexp(src, '\r?\n', 'split');
+src = { ...
+    'config',    fullfile(here, 'cars', ['config_' p.car '.m']), 'c';
+    'universal', fullfile(here, 'vehicle_params.m'),            'p';
+    'derived',   fullfile(here, 'util', 'vd_derive.m'),         'p'};
+notes = struct('name', {}, 'source', {}, 'note', {});
+for i = 1:size(src, 1)
+    notes = [notes, read_notes(src{i,2}, src{i,3}, src{i,1})]; %#ok<AGROW>
+end
 
-tier = 'input';
-meta = containers.Map('KeyType', 'char', 'ValueType', 'any');
-order = {};
-i = 1;
-last_used = 0;   % last line already consumed by a previous param's comments
-while i <= numel(lines)
-    ln = lines{i};
-    if contains(ln, 'Loaded (generated artifact)'), tier = 'loaded';  end
-    if contains(ln, '= DERIVED =')
-        tier = 'derived';
-    end
-    tok = regexp(ln, '^\s*p\.([A-Za-z]\w*)\s*=[^;]*;\s*(?:%\s?(.*))?$', ...
-                 'tokens', 'once');
-    if ~isempty(tok)
-        name = tok{1};
-        note = '';
-        if numel(tok) > 1 && ~isempty(tok{2}), note = strtrim(tok{2}); end
-        j = i + 1;                          % continuation comment lines below
-        while j <= numel(lines)
-            c = regexp(lines{j}, '^\s*%\s?(.*)$', 'tokens', 'once');
-            if isempty(c) || ~isempty(regexp(lines{j}, '^\s*%\s*[-=]{3}', 'once'))
-                break;
-            end
-            note = strtrim([note ' ' strtrim(c{1})]);
-            j = j + 1;
+rows = {'parameter', 'value', 'source', 'status', 'note'};
+names = fieldnames(p);
+for i = 1:numel(names)
+    v = p.(names{i});
+    if isstruct(v)                          % one row per sub-field
+        sub = fieldnames(v);
+        for j = 1:numel(sub)
+            nm = [names{i} '.' sub{j}];
+            rows(end+1, :) = make_row(nm, v.(sub{j}), notes); %#ok<AGROW>
         end
-        if isempty(note)                    % else: comment block directly above
-            k = i - 1;  pre = {};
-            while k > last_used
-                c = regexp(lines{k}, '^\s*%\s?(.*)$', 'tokens', 'once');
-                if isempty(c) || ~isempty(regexp(lines{k}, '^\s*%\s*[-=]{3}', 'once'))
-                    break;
-                end
-                pre = [{strtrim(c{1})}, pre]; %#ok<AGROW>
-                k = k - 1;
-            end
-            note = strtrim(strjoin(pre, ' '));
-        end
-        last_used = j - 1;
-        % duplicates (bootstrap/else branches): keep the richer note
-        if ~isKey(meta, name)
-            order{end+1} = name; %#ok<AGROW>
-            meta(name) = struct('tier', tier, 'note', note);
-        elseif numel(note) > numel(meta(name).note)
-            m = meta(name);  m.note = note;  m.tier = tier;  meta(name) = m;
-        end
-        i = j;
     else
-        i = i + 1;
+        rows(end+1, :) = make_row(names{i}, v, notes); %#ok<AGROW>
     end
 end
 
-rows = {'parameter', 'value', 'tier', 'provisional', 'source / note'};
-for k = 1:numel(order)
-    name = order{k};
-    if ~isfield(p, name), continue; end
-    m = meta(name);
-    rows(end+1, :) = {name, fmt(p.(name)), m.tier, ...
-                      prov_flag(m.note), m.note}; %#ok<AGROW>
-end
-
-fout = fullfile(here, 'organization', 'vehicle_params_report.xlsx');
-if exist(fout, 'file'), delete(fout); end   % no stale rows from old runs
+outdir = fullfile(here, 'organization');
+if ~exist(outdir, 'dir'), mkdir(outdir); end
+fout = fullfile(outdir, ['vehicle_params_report_' p.car '.xlsx']);
+if exist(fout, 'file'), delete(fout); end
 writecell(rows, fout, 'Sheet', 'params');
 
-n_prov = sum(strcmp(rows(2:end, 4), 'PROVISIONAL'));
-fprintf('params_report: %d parameters written (%d provisional) -> %s\n', ...
-        size(rows, 1) - 1, n_prov, fout);
-fprintf('This file is GENERATED - edit vehicle_params.m, then re-run.\n');
+n_flag = sum(~cellfun(@isempty, rows(2:end, 4)));
+fprintf('Wrote %d parameters (%d marked provisional, to verify or to measure) to\n  %s\n', ...
+        size(rows, 1) - 1, n_flag, fout);
+out = struct('n_params', size(rows, 1) - 1, 'n_flagged', n_flag, 'file', fout);
+end
 
-out = struct('n_params', size(rows, 1) - 1, 'n_provisional', n_prov, ...
-             'file', fout);
+function r = make_row(name, v, notes)
+k = find(strcmp({notes.name}, name), 1, 'last');
+if isempty(k)
+    source = 'artifact';  note = '';
+else
+    source = notes(k).source;  note = notes(k).note;
+end
+r = {name, fmt(v), source, flag(note), note};
+end
+
+function N = read_notes(file, prefix, source)
+% Parse 'prefix.name = value;  % note' lines plus indented comment lines
+% that continue the note. Later definitions of the same name win.
+N = struct('name', {}, 'source', {}, 'note', {});
+if ~isfile(file), return; end
+lines = regexp(fileread(file), '\r?\n', 'split');
+for i = 1:numel(lines)
+    tok = regexp(lines{i}, ['^\s*' prefix '\.([\w.]+)\s*=([^%]*)(?:%\s?(.*))?$'], 'tokens', 'once');
+    if isempty(tok), continue; end
+    note = '';
+    if numel(tok) > 2, note = strtrim(tok{3}); end
+    src_i = source;
+    if ~isempty(regexp(tok{2}, '^\s*T\.', 'once')), src_i = 'artifact'; end   % copied from the tire artifact
+    j = i + 1;
+    while j <= numel(lines) && ~isempty(regexp(lines{j}, '^\s{6,}%', 'once'))
+        note = strtrim([note ' ' strtrim(regexprep(lines{j}, '^\s*%\s?', ''))]);
+        j = j + 1;
+    end
+    N(end+1) = struct('name', tok{1}, 'source', src_i, 'note', note); %#ok<AGROW>
+end
 end
 
 function s = fmt(v)
 if ischar(v) || isstring(v)
     s = char(v);
-elseif islogical(v)
+elseif islogical(v) && isscalar(v)
     if v, s = 'true'; else, s = 'false'; end
 elseif isnumeric(v) && isscalar(v)
     s = sprintf('%.6g', v);
-elseif isnumeric(v)
+elseif isnumeric(v) || islogical(v)
     s = mat2str(v, 5);
-elseif isa(v, 'function_handle')
-    s = func2str(v);
 else
     s = class(v);
 end
 end
 
-function s = prov_flag(note)
-if contains(upper(note), 'PROVISIONAL'), s = 'PROVISIONAL'; else, s = ''; end
+function s = flag(note)
+u = upper(note);
+if contains(u, 'PROVISIONAL'),  s = 'PROVISIONAL';
+elseif contains(u, '[VERIFY]'), s = 'VERIFY';
+elseif contains(u, 'MEASURE'),  s = 'MEASURE';
+else,                           s = '';
+end
 end

@@ -1,56 +1,42 @@
 function out = run_pack_targets(p)
-% RUN_PACK_TARGETS  Accumulator series-count study (#42/#43/#44/#65).
+% RUN_PACK_TARGETS  Accumulator series-count study.
 %
-% Holds the parallel count - and therefore pack CURRENT - fixed, and sweeps the
-% series count. In a 7P architecture that is the only knob: series count moves
-% peak power, pack energy and the voltage-governed rev ceiling together, in the
-% same proportion. There is no power-vs-energy trade to optimise; the question
-% is only how many rows.
+% Holds the parallel count (and so the pack current) fixed and varies the
+% series count, which moves peak power, pack energy and the voltage-set rev
+% ceiling together.
 %
-% METHOD - why this is a solve, not a sweep over packs
-% ---------------------------------------------------
-% The energy a lap costs barely depends on the pack (only ~2 Wh per series row,
-% via cell mass), while the energy BUDGET is exactly linear in series count
-% (0.9 x 0.9 x S x P x 10.8 Wh). So the whole answer follows from ONE cap sweep
-% plus arithmetic - sampling three packs and reporting the best of them, as the
-% first version of this script did, cannot locate a threshold and will quietly
-% step over the right answer.
-%
-% Anchors are run at a few series counts only to capture the small mass effect;
-% everything between them is interpolated and solved continuously.
+% Method: the energy a lap costs barely depends on the pack (only through cell
+% mass), while the energy budget is linear in series count. So the endurance
+% power cap that fits each pack is SOLVED continuously from one cap sweep,
+% rather than read off a few sampled packs. Three anchor packs capture the
+% small mass effect; everything between them is interpolated.
 %
 % Endurance is the binding event. Two lap counts are deliberately different:
-%   feasibility  22 km / lap length  - the physical requirement (rules distance)
-%   scoring      p.scenario.benchmark_laps - the basis the 2026 Tmins were set on
+%   feasibility  rules distance / lap length (the physical requirement)
+%   scoring      p.scenario.benchmark_laps (the basis of the 2026 results)
 %
 % Writes plots/pack_targets.png.
 %
-%   out = run_pack_targets()      the active car, from vd_car / cars/config_<CAR>.m
-%   out = run_pack_targets(p)     an explicit params struct - use vd_set to build a
-%                            "what if?" car - no file on disk is touched:
-%       p = vehicle_params();
-%       out = run_pack_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
+%   out = run_pack_targets()      the active car (vd_car / cars/config_<CAR>.m)
+%   out = run_pack_targets(p)     an explicit params struct; build "what if?" cars with vd_set
 
-if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
+if nargin < 1 || isempty(p), p = vehicle_params(); end
+vd_warn('reset');
 p0   = p;
 here = vd_root();
 
 S_ANCHOR = [83 87 91];                      % series counts actually simulated
 S_GRID   = 83:0.25:91;                      % series counts solved for
 CAPS_KW  = [45 40 35 30 28 25 22 20 18 16 14];   % endurance power caps to test
-                   % The low end matters: a small pack's budget is met at a LOW
-                   % cap, so if the sweep stops at 18 kW the study has to
-                   % extrapolate to place 83-84S. Simulate the floor instead.
-CELL     = struct('V_nom',3.6, 'V_max',4.2, 'Ah',3.0, 'I_max',30, 'mass_kg',0.0466);
-INTERCON = 1.15;   % busbar/holder/segment overhead on cell mass [-] PROVISIONAL - a
-                   % GUESS, not a measurement. Small (2 kg across the whole sweep),
-                   % so not load-bearing, but replace it with a real segment mass.
-RULES_W  = 80e3;   % FSAE tractive-system power cap [W]
-R_SKID   = 9.125;  % skidpad path radius [m] - matches run_aero_targets
+                   % (low enough that the smallest pack is solved, not extrapolated)
+CELL     = p.cell; % per-cell values from the car config
+INTERCON = 1.15;   % busbar/holder/segment mass overhead on cell mass [-] PROVISIONAL
+                   %   (a guess; ~2 kg across the sweep - replace with a segment mass)
+R        = fsae_rules();
 
 REGEN = p0.scenario.regen_capture * p0.scenario.regen_rt;   % 0 = friction braking only
 
-[se, ke, ~, ~, prov] = load_track(fullfile(here, 'tracks', 'track_endurance.csv'));
+[se, ke]             = load_track(fullfile(here, 'tracks', 'track_endurance.csv'));
 [sx, kx]             = load_track(fullfile(here, 'tracks', 'track_autocross.csv'));
 laps_feas  = p0.scenario.endurance_m / se(end);      % laps to cover the rules distance
 laps_score = p0.scenario.benchmark_laps;             % laps the 2026 Tmins are quoted on
@@ -66,14 +52,14 @@ budget = nan(nA,1); dmass = nan(nA,1);
 for i = 1:nA
     pa = set_pack(p0, S_ANCHOR(i), CELL, INTERCON);
     V_nom(i)  = pa.V_pack_nom;  E_pack(i) = pa.E_pack_Wh;
-    P_nom(i)  = min(RULES_W, pa.V_pack_nom * pa.I_pack_max);
-    P_full(i) = min(RULES_W, pa.V_pack_max * pa.I_pack_max);
+    P_nom(i)  = min(R.P_max_W, pa.V_pack_nom * pa.I_pack_max);
+    P_full(i) = min(R.P_max_W, pa.V_pack_max * pa.I_pack_max);
     budget(i) = pa.scenario.pack_usable_f * pa.scenario.margin * pa.E_pack_Wh;
     dmass(i)  = pa.m - p0.m;
 
-    % Sprint events run at FULL power - the endurance cap does not apply to them.
-    t_acc(i)  = accel_time(pa, 75);
-    t_skid(i) = 2*pi*R_SKID / corner_speed(pa, 1/R_SKID);
+    % Sprint events run at full power; the endurance cap does not apply.
+    t_acc(i)  = accel_time(pa);
+    t_skid(i) = 2*pi*R.skidpad_R_m / corner_speed(pa, 1/R.skidpad_R_m);
     [~, t_ax(i)] = lap_sim(pa, sx, kx, 0, false);
 
     for j = 1:nC
@@ -97,7 +83,7 @@ for g = 1:nG
     Eg = fliplr(Eg);  Tg = fliplr(Tg);                 % ascending in cap
     bud = interp1(S_ANCHOR, budget, S, 'linear', 'extrap');
 
-    if bud < Eg(1)      % budget below the cheapest cap tested - extrapolate the local slope
+    if bud < Eg(1)      % budget below the lowest cap tested: extrapolate the local slope
         extrap(g) = true;
         slope = (Eg(2) - Eg(1)) / (caps_asc(2) - caps_asc(1));      % [Wh per kW]
         cap(g)   = caps_asc(1) - (Eg(1) - bud)/slope;
@@ -113,58 +99,58 @@ for g = 1:nG
                 'skidpad',  interp1(S_ANCHOR, t_skid, S, 'linear', 'extrap'), ...
                 'autocross',interp1(S_ANCHOR, t_ax,   S, 'linear', 'extrap'), ...
                 'endurance_lap', lap_s(g), 'laps', laps_score, ...
-                'energy_kWh', bud/laps_feas*laps_score/1000);
+                'energy_kWh', bud/laps_feas*laps_score/1000, 'lap_km', se(end)/1000);
     [pts(g), brk] = fsae_points(ev, bm);
     pts_end(g) = brk.endurance;  pts_eff(g) = brk.efficiency;  pts_acc(g) = brk.accel;
 end
 
 % ------------------------------- report ---------------------------------
-fprintf('\nACCUMULATOR SERIES-COUNT STUDY  (%dP fixed, %s)\n', p0.pack_P, p0.cell_id);
-fprintf('%s, %.0f m/lap. Feasibility on %.1f laps (%.0f km); scoring on %d laps.\n', ...
-        prov.source_png, se(end), laps_feas, p0.scenario.endurance_m/1000, laps_score);
-if REGEN > 0
-    fprintf('Regen ACTIVE: %.0f%% capture x %.0f%% round-trip = %.0f%% of braking energy.\n', ...
-            100*p0.scenario.regen_capture, 100*p0.scenario.regen_rt, 100*REGEN);
-else
-    fprintf('NO REGEN (regen_capture = 0) - friction braking only, per the TR27 decision.\n');
-end
-fprintf('Pack current fixed at %.0f A (%dP x %.0f A/cell) - series count is the only knob.\n', ...
-        p0.pack_P*CELL.I_max, p0.pack_P, CELL.I_max);
-fprintf('Simulated at %s; everything between is solved, not sampled.\n\n', mat2str(S_ANCHOR));
+fprintf('\nAccumulator series count - %s  (%dP, %s; pack current %.0f A; %s)\n', ...
+        p0.car, p0.pack_P, p0.cell_id, p0.pack_P*CELL.I_max, ...
+        tern(REGEN > 0, sprintf('regen %.0f %% of braking energy', 100*REGEN), 'no regen'));
+fprintf(['  Endurance needs %.1f laps (%.0f km) of %.0f m; points are scored on %d laps,\n' ...
+         '  the basis of the 2026 results. Packs of %s cells in series are\n' ...
+         '  simulated; counts in between are interpolated.\n\n'], ...
+        laps_feas, p0.scenario.endurance_m/1000, se(end), laps_score, ...
+        strjoin(arrayfun(@num2str, S_ANCHOR, 'UniformOutput', false), ', '));
 
 SHOW = [83 84 86 87 88 89 90 91];
-fprintf('%5s %7s %8s %8s %8s %9s %8s %9s %9s %8s\n', ...
-        'S','V_nom','E[Wh]','P_nom','budget','cap[kW]','lap[s]','end.pts','eff.pts','TOTAL');
+fprintf('    %-7s %-8s %-7s %-7s %-8s %-8s %-9s %-10s %-10s %s\n', 'series', 'pack', 'pack', 'pack', ...
+        'energy', 'power', 'endur.', 'endurance', 'efficiency', 'total');
+fprintf('    %-7s %-8s %-7s %-7s %-8s %-8s %-9s %-10s %-10s %s\n', 'cells', 'voltage', 'energy', 'power', ...
+        'budget', 'cap', 'lap', 'points', 'points', 'points');
+fprintf('    %-7s %-8s %-7s %-7s %-8s %-8s %-9s\n', '', '[V]', '[Wh]', '[kW]', '[Wh]', '[kW]', '[s]');
 for S = SHOW
     if S < S_GRID(1) || S > S_GRID(end), continue; end
     g = idx(S_GRID, S);
-    fprintf('%4dS %7.1f %8.0f %7.1fk %8.0f %9.2f%s %8.2f %9.1f %9.1f %8.1f\n', ...
+    fprintf('    %-7d %-8.1f %-7.0f %-7.1f %-8.0f %-8s %-9.2f %-10.1f %-10.1f %.1f\n', ...
         S, interp1(S_ANCHOR,V_nom,S,'linear','extrap'), ...
         interp1(S_ANCHOR,E_pack,S,'linear','extrap'), ...
         interp1(S_ANCHOR,P_nom,S,'linear','extrap')/1e3, Ecap(g), ...
-        cap(g), tern(extrap(g),'*',' '), lap_s(g), pts_end(g), pts_eff(g), pts(g));
+        [sprintf('%.2f', cap(g)) tern(extrap(g),'*','')], lap_s(g), pts_end(g), pts_eff(g), pts(g));
 end
-if any(extrap), fprintf('  * extrapolated below the %.0f kW sweep floor - add lower caps to confirm\n', min(CAPS_KW)); end
+if any(extrap)
+    fprintf('  * below the lowest power cap tested (%.0f kW), so extrapolated.\n', min(CAPS_KW));
+end
 
-fprintf('\nDECISION EVIDENCE\n');
-g84 = idx(S_GRID,84);
-fprintf('  * One series row (%d cells, %.2f kg) = %+.2f kW of cap = %+.2f total points.\n', ...
-        p0.pack_P, p0.pack_P*CELL.mass_kg*INTERCON, ...
-        (cap(idx(S_GRID,91))-cap(g84))/7, (pts(idx(S_GRID,91))-pts(g84))/7);
-fprintf('  * Endurance and efficiency move OPPOSITE ways: a bigger pack runs a higher\n');
-fprintf('    cap, which burns more energy. Across 84S->91S endurance %+.1f, efficiency %+.1f.\n', ...
-        pts_end(idx(S_GRID,91))-pts_end(g84), pts_eff(idx(S_GRID,91))-pts_eff(g84));
-fprintf('    Most of the net gain is ACCEL (%+.1f pts), via the voltage-governed rev ceiling.\n', ...
-        pts_acc(idx(S_GRID,91))-pts_acc(g84));
-fprintf('  * Continuous power is fuse-limited to %.1f kW at 84S and %.1f kW at 91S (%.0f A\n', ...
-        p0.I_fuse_main*84*CELL.V_nom/1e3, p0.I_fuse_main*91*CELL.V_nom/1e3, p0.I_fuse_main);
-fprintf('    main fuse) - check that against the caps above before buying cells.\n');
-fprintf('  * The curve is smooth. There is no cliff and no optimum: the model gives an\n');
-fprintf('    exchange rate, and packaging (segment split) decides which count to take.\n');
-fprintf(['Caveat: QSS lap sim; the two 0.9 derates (BMS window, design margin) are\n' ...
-         '  unexamined CHOICES; interconnect mass is a guess; tire artifact not rebuilt\n' ...
-         '  for the small mass change; rev ceiling scaled with pack voltage off the\n' ...
-         '  active config''s value (which is itself PROVISIONAL, #47).\n']);
+g84 = idx(S_GRID,84);  g91 = idx(S_GRID,91);
+fprintf('\n');
+vd_row(sprintf('Per extra series row (%d cells, %.2f kg)', p0.pack_P, p0.pack_P*CELL.mass_kg*INTERCON), ...
+       sprintf('%+.2f points', (pts(g91)-pts(g84))/7), ...
+       sprintf('%+.2f kW cap', (cap(g91)-cap(g84))/7));
+vd_row('84 -> 91 cells: endurance points', sprintf('%+.1f', pts_end(g91)-pts_end(g84)));
+vd_row('84 -> 91 cells: efficiency points', sprintf('%+.1f', pts_eff(g91)-pts_eff(g84)));
+vd_row('84 -> 91 cells: acceleration points', sprintf('%+.1f', pts_acc(g91)-pts_acc(g84)), ...
+       'higher voltage, higher rev limit');
+vd_row(sprintf('Power at the %.0f A main fuse, 84 / 91 cells', p0.I_fuse_main), ...
+       sprintf('%.1f / %.1f kW', p0.I_fuse_main*84*CELL.V_nom/1e3, p0.I_fuse_main*91*CELL.V_nom/1e3));
+fprintf(['  A bigger pack runs a higher endurance power cap, which uses more energy, so\n' ...
+         '  endurance and efficiency points move in opposite directions. The table gives\n' ...
+         '  the exchange rate; packaging decides the count.\n']);
+fprintf(['Assumes: the BMS usable window and energy margin are choices; interconnect mass\n' ...
+         '         is a guess (%.2f x cell mass); the tire fit is not rebuilt for the small\n' ...
+         '         mass change; the rev limit scales with pack voltage from the configured\n' ...
+         '         value (provisional).\n'], INTERCON);
 
 out = struct('S_anchor', S_ANCHOR, 'S', S_GRID, 'caps_kW', CAPS_KW, ...
              'E_lap_Wh', E_lap, 't_lap', t_lap, 't_acc', t_acc, 't_skid', t_skid, ...
@@ -179,21 +165,18 @@ if ~exist(outdir, 'dir'), mkdir(outdir); end
 if vd_plots()
 try
     pack_plot(S_GRID, cap, pts, outdir);
-    fprintf('Plot written: plots/pack_targets.png\n');
+    fprintf('Saved plots/pack_targets.png\n');
 catch e
-    fprintf('[plot skipped: %s]\n', e.message);
+    fprintf('Plot not saved: %s\n', e.message);
 end
 end
 end
 
 
 function p = set_pack(p, S, CELL, intercon)
-% Same car with a different series count. vd_set applies the inputs and calls
-% vd_derive, so total mass, axle loads, k_rot, Izz, P_max, v_max and the design
-% corner load are all rebuilt together - see util/vd_derive.m.
-% Rev ceiling is voltage-governed (VD_physics_reference, "Rev limit is
-% voltage-governed"), scaled off the active config's value so the baseline is
-% preserved exactly and only the RELATIVE effect of series count is studied.
+% Same car with S cells in series. The rev ceiling is set by pack voltage, so
+% it scales with S from the config value (the baseline pack reproduces the
+% config exactly). vd_set re-derives mass, P_max, v_max and the rest.
 dS = S - p.pack_S;
 p = vd_set(p, ...
     'pack_S',        S, ...
@@ -215,22 +198,6 @@ end
 end
 
 
-function t = accel_time(p, dist)
-% Fixed-VELOCITY-step integration, matching run_gg_targets' accel_event - the
-% scheme that reproduces the issued 75 m time. NOT the dx-stepped version in
-% run_gear_targets, which advances time as dx/v_end and reads ~0.25 s fast.
-vg  = linspace(0, p.v_max, 60);
-axf = arrayfun(@(vv) ax_limit(p, vv, 'accel'), vg);
-v = 0; x = 0; t = 0; dv = 0.005;
-while x < dist
-    if v >= p.v_max, t = t + (dist - x)/p.v_max; return; end
-    a = interp1(vg, axf, min(max(v,0), p.v_max)) * p.g;
-    if a <= 0, return; end
-    dt = dv/a;  x = x + v*dt + 0.5*a*dt^2;  t = t + dt;  v = v + dv;
-end
-end
-
-
 function i = idx(grid, val)
 [~, i] = min(abs(grid - val));
 end
@@ -241,11 +208,8 @@ end
 
 
 function pack_plot(S, cap, pts, outdir)
-% Endurance power cap and the dynamic points it is worth, both against series
-% count. Twin axes because the two measures share an x and nothing else; each
-% line carries its own colour AND line style so the pair survives greyscale.
-% Points are referenced to the smallest pack on the grid - the decision is the
-% difference between counts, not the absolute score.
+% Endurance power cap and dynamic points against series count. Points are
+% relative to the smallest pack: the decision is the difference between counts.
 BLUE = [0.122 0.310 0.847];  ORANGE = [0.761 0.255 0.047];
 
 d  = pts - pts(1);

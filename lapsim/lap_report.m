@@ -1,30 +1,29 @@
 function lap_report(track_csv, p)
-% LAP_REPORT  Lap dashboard + endurance energy budget figures -> plots/.
-% Prints axle vs point-mass lap times side by side.
-%
-%   lap_report(track_csv)      the active car
+% LAP_REPORT  Lap dashboard and endurance energy budget figures -> plots/.
+%   lap_report(track_csv)      the active car (default: endurance)
 %   lap_report(track_csv, p)   an explicit params struct (see vd_set)
+% Also prints the lap time on the point-mass lateral limit next to the axle
+% model, to show how much the load-sensitive model takes off.
 
 if nargin < 1 || isempty(track_csv), track_csv = 'track_endurance.csv'; end
 if nargin < 2 || isempty(p), p = vehicle_params(); end   % no p = the active car
-% Scenario assumptions from p.scenario (vehicle_params) - single source, so these
-% cannot silently drift apart from run_energy_strategy / run_aero_targets.
+vd_warn('reset');
 REGEN_CAPTURE = p.scenario.regen_capture;
 REGEN_RT      = p.scenario.regen_rt;
 PACK_USABLE_F = p.scenario.pack_usable_f;
-ENDURANCE_M   = p.scenario.endurance_m;   % OFFICIAL rules distance (feasibility basis)
+ENDURANCE_M   = p.scenario.endurance_m;   % rules distance
 here = vd_root();
 [~, name] = fileparts(track_csv);  name = strrep(name, 'track_', '');
-[s, kappa, x, y] = load_track(fullfile(here, 'tracks', track_csv));
-[v, t_lap, E] = lap_sim(p, s, kappa, [], true);
+[s, kappa, x, y, prov] = load_track(fullfile(here, 'tracks', track_csv));
+if prov.closed, v0 = []; else, v0 = 0; end
+[v, t_lap, E] = lap_sim(p, s, kappa, v0, prov.closed);
 
-% Before/after: same car on the point-mass lateral limit (the old optimistic
-% model) so the fidelity gain from the axle upgrade is quantified, not asserted.
-p_pm = p;  p_pm.grip_model = 'pointmass';
-[~, t_pm] = lap_sim(p_pm, s, kappa, [], true);
-fprintf(['lap_report: %s lap  axle(realistic) %.2f s  vs  point-mass %.2f s' ...
-         '  ->  point mass is %.2f s / %.1f%% optimistic\n'], ...
-        name, t_lap, t_pm, t_lap - t_pm, 100*(t_lap - t_pm)/t_lap);
+p_pm = p;  p_pm.grip_model = 'pointmass';      % same car, constant-mu lateral limit
+[~, t_pm] = lap_sim(p_pm, s, kappa, v0, prov.closed);
+fprintf('\nLap report - %s, %s\n', p.car, name);
+vd_row('Lap time, axle model', sprintf('%.2f s', t_lap));
+vd_row('Lap time, constant-grip point mass', sprintf('%.2f s', t_pm), ...
+       sprintf('%.2f s (%.1f %%) faster', t_lap - t_pm, 100*(t_lap - t_pm)/t_lap));
 
 ds   = diff(s);
 ax_g = [diff(v.^2)./(2*ds); 0] / p.g;
@@ -41,7 +40,7 @@ plot(x(1), -y(1), 'ks', 'MarkerSize', 9, 'MarkerFaceColor', 'k');
 axis equal; grid on;
 cb = colorbar; cb.Label.String = 'speed [m/s]';
 xlabel('x [m]'); ylabel('y [m]');
-title(sprintf('%s - %.0f m, %.1f s per lap (QSS, square = start/finish)', ...
+title(sprintf('%s - %.0f m, %.1f s (square = start)', ...
       name, s(end), t_lap), 'FontWeight', 'bold');
 
 subplot(2,2,3);
@@ -69,7 +68,8 @@ title('Achieved g-g vs envelope (curvature unsigned)', 'FontWeight', 'bold');
 
 saveas(f, fullfile(outdir, ['lap_dashboard_' name '.png'])); close(f);
 
-% Energy budget (endurance projection from this lap)
+% Endurance energy budget, projected from this lap (meaningful for the
+% endurance track)
 laps    = ENDURANCE_M / s(end);
 E_dem   = E.drive_acc_Wh * laps / 1000;                          % kWh
 E_regen = E.brake_wheel_Wh * REGEN_CAPTURE * REGEN_RT * laps / 1000;
@@ -90,10 +90,11 @@ for i = 1:numel(vals)
 end
 set(gca, 'YTick', 1:numel(vals), 'YTickLabel', labs(end:-1:1));
 xline(pack_u, ':', 'Color', [0 0.45 0.70]);
-xlabel('energy for 22 km endurance [kWh]'); xlim([0 11]); grid on; box off;
-title(sprintf(['Endurance energy budget (%s) - regen and/or power derating ' ...
-      'required to finish'], name), 'FontWeight', 'bold');
+xlabel(sprintf('energy for %.0f km endurance [kWh]', ENDURANCE_M/1000)); xlim([0 1.15*max(vals)]); grid on; box off;
+if E_dem - E_regen > pack_u, verdict = 'demand exceeds usable pack at full power';
+else,                         verdict = 'fits the usable pack at full power'; end
+title(sprintf('Endurance energy budget (%s) - %s', name, verdict), 'FontWeight', 'bold');
 saveas(f, fullfile(outdir, 'energy_budget.png')); close(f);
 
-fprintf('lap_report: dashboard + energy budget written to plots/ (%s)\n', name);
+fprintf('Saved plots/lap_dashboard_%s.png and plots/energy_budget.png\n', name);
 end

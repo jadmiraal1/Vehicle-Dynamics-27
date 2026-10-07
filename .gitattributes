@@ -1,8 +1,17 @@
 * text=auto
-*.mat binary
-*.png binary
-*.pdf binary
+# Source and text data: LF on every platform, so files (and the tire-artifact
+# hash) are byte-identical on Windows, macOS and Linux.
+*.m    text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.tsv  text eol=lf
+*.csv  text eol=lf
+*.txt  text eol=lf
+*.mermaid text eol=lf
+*.mat  binary
+*.png  binary
+*.pdf  binary
 *.xlsx binary
 *.pptx binary
 *.docx binary
-*.csv text

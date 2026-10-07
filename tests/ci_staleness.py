@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
-"""Staleness bookkeeping the CI can enforce WITHOUT the tire data.
+"""Tire-artifact bookkeeping that CI can check without the tire data.
 
 Run:  python3 tests/ci_staleness.py [base-ref]
 
-WHY THIS IS SEPARATE FROM THE REAL GATE
----------------------------------------
-vd_selftest's hash gate is the real protection: it hashes the fit code AND the
-TTC files and refuses to run when the artifact does not match. CI cannot do that
-- TTC_Data/ is licensed and gitignored, so a hosted runner has no data and the
-hash is not comparable.
+vd_selftest's hash check is the real protection: it hashes the fit code and
+the TTC files and refuses a stale artifact. CI has no TTC data (licensed,
+gitignored), so it checks only the bookkeeping: if a file the artifact is
+built from changed, the artifact must have been rebuilt in the same change.
+It cannot see a change to the data itself and verifies no numbers.
 
-What CI CAN check is the bookkeeping half: if someone changed a file that the
-artifact is built from, the artifact must have been rebuilt in the same change.
-That catches the common mistake ("edited the fit, forgot to rebuild") without
-needing a single byte of tire data. It does NOT catch a change to the data
-itself, and it does not verify any number - say so, do not oversell it.
-
-Exit code 0 = fine, 1 = someone changed the fit without rebuilding.
+Exit code 0 = fine, 1 = a hashed source changed without a rebuild,
+2 = the hashed-source list could not be read.
 """
 
 import os
@@ -39,14 +33,18 @@ def active_car():
 
 
 def hashed_sources():
-    """The list build_tire_coeffs feeds to vd_hash, minus the TTC files."""
-    path = os.path.join(ROOT, "tire", "build_tire_coeffs.m")
+    """The code files tire/tire_src_files.m feeds to vd_hash (TTC files excluded).
+
+    Returns None if the list cannot be read, so a refactor of that file fails
+    loudly instead of silently turning this check off."""
+    path = os.path.join(ROOT, "tire", "tire_src_files.m")
+    if not os.path.exists(path):
+        return None
     with open(path, encoding="utf-8") as f:
         src = f.read()
-    m = re.search(r"function files = tire_src_files\(here\)(.*?)\nend", src, re.S)
-    if not m:
-        return []
-    return ["tire/" + n for n in re.findall(r"'([A-Za-z0-9_]+\.m)'", m.group(1))]
+    code = "\n".join(l.split("%", 1)[0] for l in src.splitlines())   # drop comments
+    names = re.findall(r"fullfile\(root,\s*'tire',\s*'([A-Za-z0-9_]+\.m)'\)", code)
+    return ["tire/" + n for n in names] or None
 
 
 def pick_base(argv):
@@ -87,6 +85,10 @@ def main():
     print(f"  base {base}: {len(changed)} file(s) changed")
 
     sources = hashed_sources()
+    if sources is None:
+        print("  FAIL  could not read the hashed-source list from tire/tire_src_files.m")
+        return 2
+    print(f"  hashed sources: {', '.join(sources)}")
     touched = sorted(changed & set(sources))
     artifact_rebuilt = artifact in changed
 
@@ -98,9 +100,9 @@ def main():
         print(f"  FAIL  changed: {', '.join(touched)}")
         print(f"        but {artifact} was NOT rebuilt in this change.")
         print()
-        print("  The tire artifact is generated from those files. Ship them out of")
-        print("  step and every clone runs on grip that no longer matches the fit,")
-        print("  which vd_selftest will only catch on a machine that has the data.")
+        print("  The tire artifact is generated from those files. Out of step, every")
+        print("  clone runs on grip that no longer matches the fit, and only a")
+        print("  machine with the data would notice.")
         print()
         print("  On a machine with TTC_Data/:")
         print("      build_tire_coeffs")
@@ -110,9 +112,8 @@ def main():
         return 1
 
     print()
-    print("  NOTE  this only checks that the artifact was rebuilt. It cannot")
-    print("        verify any tire number, and it cannot see a change to the TTC")
-    print("        data itself - that is vd_selftest's hash gate, run locally.")
+    print("  NOTE  this checks only that the artifact was rebuilt; tire numbers and")
+    print("        TTC data changes are checked by vd_selftest, run locally.")
     return 0
 
 

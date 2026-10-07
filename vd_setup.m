@@ -3,5 +3,6 @@ function vd_setup()
 r = fileparts(mfilename('fullpath'));
 addpath(r, fullfile(r,'util'), fullfile(r,'cars'), fullfile(r,'tire'), fullfile(r,'models'), ...
         fullfile(r,'lapsim'), fullfile(r,'targets'), fullfile(r,'tests'));
-fprintf('VD toolchain on path. Entry points: run_* targets, build_tire_coeffs, vd_selftest.\n');
+vd_warn('reset');
+fprintf('Vehicle dynamics toolchain added to the path. New here? Read README.md, then run vd_selftest.\n');
 end

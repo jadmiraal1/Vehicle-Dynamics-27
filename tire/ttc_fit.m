@@ -1,13 +1,16 @@
 function R = ttc_fit()
-% TTC_FIT  Percentile-based TTC grip screening across candidate tires.
-% Screening only - design grip comes from build_tire_coeffs (curve basis).
+% TTC_FIT  Quick grip screening of the candidate tires from raw TTC data.
+%   R = ttc_fit()
+% Peak |F/Fz| as the 99th percentile of the samples near the design load,
+% plus camber and pressure windows. Screening only: the design tire model
+% comes from pacejka_fit / build_tire_coeffs. vd_selftest uses one value as
+% a raw-data anchor.
 
-p = vehicle_params('bootstrap');   % car mass only; must not require the
-                                   % artifact that this fit helps produce
+p = vehicle_params('bootstrap');   % car only; no tire artifact needed
 
 % Design assumptions
-R.derate      = p.mu_derate;        % grip scaling factor (single source: vehicle_params)
-N_PER_LBF     = 4.44822;
+R.derate      = p.mu_derate;        % belt -> track grip scaling (car config)
+N_PER_LBF     = vd_const().N_PER_LBF;
 Fz_design_N   = p.m * p.g / 4;      % static per-corner load [N]
 Fz_design_lbf = Fz_design_N / N_PER_LBF;
 LOAD_BAND     = 0.12;               % +/-12% band around design load
@@ -29,13 +32,8 @@ for k = 1:numel(tire_names)
     D = load_tire_data(data_dir, [tire '_*.mat']);
     Fz_mag = -D.FZ;                                    % SAE: FZ < 0 under load
 
-    % Pure-slip lateral samples in the design load band, ROLLING ONLY.
-    % Same reason as pacejka_fit: roughly half the samples in each tire's first
-    % TTC run are below 5 mph and carry almost no lateral force. The 99th
-    % percentile is far more robust to that than a median fit is - dropping
-    % them moves this screening number by only +0.3% to +1.3% - but a
-    % percentile taken over a population that is half non-rolling is still not
-    % the quantity anyone thinks it is.
+    % Pure-slip lateral samples in the design load band, rolling only (as in
+    % pacejka_fit).
     pure_slip      = (abs(D.FX ./ D.FZ) < 0.10) & (Fz_mag > 5) & (D.V > 20);
     at_design_load = pure_slip & (abs(Fz_mag - Fz_design_lbf) < Fz_design_lbf * LOAD_BAND);
 
@@ -62,10 +60,10 @@ for k = 1:numel(tire_names)
             mu_y_raw * R.derate, R.(tire).bestIA, char(176), R.(tire).bestP);
 end
 
-% Longitudinal mu from the only drive/brake file (near-zero slip angle, wider band)
+% Longitudinal mu from the only drive/brake data (near-zero slip angle, wider band)
 D = load_tire_data(data_dir, 'LC0_18x60_*.mat');
 Fz_mag         = -D.FZ;
-pure_slip      = (abs(D.SA) < 1.0) & (Fz_mag > 5);
+pure_slip      = (abs(D.SA) < 1.0) & (Fz_mag > 5) & (D.V > 20);
 at_design_load = pure_slip & (abs(Fz_mag - Fz_design_lbf) < Fz_design_lbf * 0.30);
 
 mu_x_raw = peak_friction(D.FX, D.FZ, at_design_load);
@@ -75,11 +73,13 @@ fprintf('\nmu_x (LC0_18x60 drive/brake): raw %.3f -> derated %.3f  (cross-tire p
         mu_x_raw, mu_x_raw * R.derate);
 fprintf('Screening only. Design grip comes from build_tire_coeffs, not from here.\n');
 
+if vd_plots()
 try
     make_plot(R, tire_names, camber_sweep_deg, pressure_sweep_psi);
-    fprintf('Plot written: ttc_fit.png\n');
+    fprintf('Saved plots/ttc_fit.png\n');
 catch e
-    fprintf('[plot skipped: %s]\n', e.message);
+    fprintf('Plot not saved: %s\n', e.message);
+end
 end
 end
 

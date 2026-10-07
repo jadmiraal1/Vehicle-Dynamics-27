@@ -4,22 +4,13 @@ function was = vd_plots(state)
 %   old = vd_plots(false)   turn drawing off, return the previous state
 %   vd_plots(old)       put it back
 %
-% WHY THIS EXISTS
-% ---------------
-% Every run_* target ends by drawing and saving a figure. That is correct when a
-% person runs it and wrong when a test suite does: rendering and writing PNGs is
-% most of the wall-clock cost of a test run, it leaves files and windows behind,
-% and none of it is what the test is checking. vd_selftest and vd_golden turn
-% drawing off for the duration and put it back afterwards.
-%
-% Use onCleanup so an error mid-suite cannot leave plotting switched off for the
-% rest of the session:
+% Targets draw and save figures when a person runs them; vd_selftest and
+% vd_golden switch drawing off for speed and restore it afterwards:
 %
 %     old = vd_plots(false);
 %     restore = onCleanup(@() vd_plots(old));
 %
-% This is a session-level switch, not a car property, so it deliberately does
-% NOT live on p - it must not travel through vd_set or end up in an artifact.
+% A session setting, not a car property, so it does not live on p.
 
 persistent enabled
 if isempty(enabled), enabled = true; end

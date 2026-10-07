@@ -1,55 +1,56 @@
 function out = run_handling_targets(p)
-% RUN_HANDLING_TARGETS  Bicycle-model targets: K, stability speed, yaw gain/response.
+% RUN_HANDLING_TARGETS  Linear bicycle-model targets: understeer gradient,
+% critical/characteristic speed, yaw-rate gain and yaw response time.
 %
-%   out = run_handling_targets()      the active car, from vd_car / cars/config_<CAR>.m
-%   out = run_handling_targets(p)     an explicit params struct - use vd_set to build a
-%                            "what if?" car - no file on disk is touched:
-%       p = vehicle_params();
-%       out = run_handling_targets(vd_set(p, 'm_car', 240, 'ClA', 4.0));
+%   out = run_handling_targets()      the active car (vd_car / cars/config_<CAR>.m)
+%   out = run_handling_targets(p)     an explicit params struct; build "what if?" cars with vd_set
 
-if nargin < 1 || isempty(p), p = vehicle_params(); end   % no argument = the active car (vd_car)
+if nargin < 1 || isempty(p), p = vehicle_params(); end
+vd_warn('reset');
 
-% Cornering stiffness comes from the artifact (p.Ca_coef, loaded from
-N_PER_LBF = 4.44822;
-LBF_DEG_TO_N_RAD = N_PER_LBF * 180/pi;
+k = vd_const();
+LBF_DEG_TO_N_RAD = k.LBF_DEG_TO_N_RAD;
 
-% Axle stiffness at static loads, via understeer_at's shared evaluator (ax=0
-% gives exactly the static axle loads), so this and the stability study agree.
+% Axle cornering stiffness at the static loads (understeer_at at ax = 0), so
+% this study and run_stability_targets read the tire the same way.
 [~, i0] = understeer_at(p, 0);
 Ca_axle_f = i0.Ca_f;
 Ca_axle_r = i0.Ca_r;
 
 B = bicycle_model(p, Ca_axle_f, Ca_axle_r, linspace(1, p.v_max, 100));
 
-fprintf('\nSTEADY-STATE HANDLING (bicycle model, static loads, linear tires)\n');
-fprintf('Axle Ca: front %.0f N/rad (%.0f lbf/deg), rear %.0f N/rad (%.0f lbf/deg)\n', ...
-        Ca_axle_f, Ca_axle_f/LBF_DEG_TO_N_RAD, Ca_axle_r, Ca_axle_r/LBF_DEG_TO_N_RAD);
-fprintf('T-USG  understeer gradient : K = %+.3f deg/g  (%s)\n', ...
-        B.K_deg, balance_word(B.K_deg));
-if isfield(B, 'v_crit')
-    fprintf('T-VCR  critical speed      : %.0f m/s (v_max %.1f -> margin %.1fx)\n', ...
-            B.v_crit, p.v_max, B.v_crit/p.v_max);
-    out.v_crit = B.v_crit;
-else
-    fprintf('T-VCH  characteristic speed: %.0f m/s\n', B.v_char);
-    out.v_char = B.v_char;
-end
-
 gain_15   = interp1(B.v, B.yaw_gain, 15);
 gain_vmax = B.yaw_gain(end);
-fprintf('T-YRG  yaw-rate gain       : %.2f (deg/s)/deg @ 15 m/s (neutral %.2f), %.2f @ v_max (neutral %.2f)\n', ...
-        gain_15, 15/p.L, gain_vmax, p.v_max/p.L);
-
 [~, i15] = min(abs(B.v - 15));
-fprintf('T-YAW  yaw response        : tau %.0f ms @ 15 m/s -> %.0f ms @ v_max, zeta %.2f-%.2f\n', ...
-        1000*B.tau_slow(i15), 1000*B.tau_slow(end), min(B.zeta_eq), max(B.zeta_eq));
-fprintf('       (zeta >= 1: overdamped, no yaw oscillation; Izz = %.0f kg*m^2, DI %.2f prov.)\n', ...
-        p.Izz, p.DI);
-fprintf('Caveat: static axle loads, linear tires (valid to ~0.4 g), no load\n');
-fprintf('        transfer or roll stiffness (mid-tier moves K). lambda_Ca=%.2f prov.\n', ...
-        p.lambda_Ca);
 
-out.Ca_coef_source = 1;   % 1 = from the tire_coeffs_<CAR>.mat artifact (not a live fit)
+fprintf('\nHandling - %s  (linear bicycle model, top speed %.1f m/s)\n', p.car, p.v_max);
+vd_row('Understeer gradient', sprintf('%+.3f deg/g', B.K_deg), balance_word(B.K_deg));
+if isfinite(B.v_crit)            % oversteer: speed where the car goes unstable
+    vd_row('Critical speed (unstable above)', sprintf('%.0f m/s', B.v_crit), ...
+           sprintf('%.1fx top speed', B.v_crit/p.v_max), ternary(B.v_crit > p.v_max, 'OK', 'TOO LOW'));
+elseif isfinite(B.v_char)        % understeer: speed of maximum yaw-rate gain
+    vd_row('Characteristic speed (max yaw gain)', sprintf('%.0f m/s', B.v_char));
+else
+    vd_row('Neutral steer', '-', 'no critical or characteristic speed');
+end
+vd_row('Yaw-rate gain at 15 m/s [(deg/s)/deg]', sprintf('%.2f', gain_15), ...
+       sprintf('neutral car %.2f', 15/p.L));
+vd_row('Yaw-rate gain at top speed [(deg/s)/deg]', sprintf('%.2f', gain_vmax), ...
+       sprintf('neutral car %.2f', p.v_max/p.L));
+vd_row('Yaw response time, 15 m/s / top speed', ...
+       sprintf('%.0f / %.0f ms', 1000*B.tau_slow(i15), 1000*B.tau_slow(end)));
+vd_row('Yaw damping ratio', sprintf('%.2f-%.2f', min(B.zeta_eq), max(B.zeta_eq)), ...
+       ternary(min(B.zeta_eq) >= 1, 'no overshoot', 'overshoots'));
+vd_row('Axle cornering stiffness, front / rear', ...
+       sprintf('%.0f / %.0f lbf/deg', Ca_axle_f/LBF_DEG_TO_N_RAD, Ca_axle_r/LBF_DEG_TO_N_RAD));
+fprintf(['Assumes: static axle loads, no downforce, linear tires (valid to about 0.4 g),\n' ...
+         '         no lateral load transfer, roll or compliance steer. Provisional: yaw\n' ...
+         '         inertia (dynamic index %.2f, %.0f kg*m^2) and tire stiffness scale %.2f.\n'], ...
+        p.DI, p.Izz, p.lambda_Ca);
+out.v_crit = B.v_crit;
+out.v_char = B.v_char;
+
+out.Ca_coef_source = 1;   % 1 = cornering stiffness read from the tire artifact
 out.Ca_axle_f   = Ca_axle_f;
 out.Ca_axle_r   = Ca_axle_r;
 out.K_deg_per_g = B.K_deg;
@@ -60,15 +61,15 @@ out.Izz         = p.Izz;
 if vd_plots()
 try
     make_plot(p, B);
-    fprintf('Plot written: handling_response.png\n');
+    fprintf('Saved plots/handling_response.png\n');
 catch e
-    fprintf('[plot skipped: %s]\n', e.message);
+    fprintf('Plot not saved: %s\n', e.message);
 end
 end
 end
 
 function make_plot(p, B)
-% Left: steady-state gain vs neutral. Right: transient yaw response.
+% Left: steady-state yaw-rate gain vs a neutral car. Right: transient yaw response.
 f = figure('Visible', 'off', 'Position', [100 100 1000 420]);
 
 subplot(1,2,1); hold on;
@@ -98,7 +99,11 @@ end
 
 function s = balance_word(K)
 if     K >  0.1, s = 'understeer';
-elseif K < -0.1, s = 'oversteer - check margin';
+elseif K < -0.1, s = 'oversteer';
 else,            s = 'near neutral';
 end
+end
+
+function s = ternary(cond, a, b)
+if cond, s = a; else, s = b; end
 end

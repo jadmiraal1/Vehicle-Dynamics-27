@@ -4,9 +4,8 @@ function F = tire_forces(p, Fz_lbf, alpha_deg, gamma_deg)
 %   F = tire_forces(p, Fz_lbf, alpha_deg, gamma_deg)    with camber
 %   F = tire_forces(p, Fz_lbf, [],        gamma_deg)    capability only, no curve
 %
-% This is the single tire evaluator. Everything that wants to know what one
-% tire can do should come through here rather than reaching for mu_of_load and
-% p.Ca_coef separately, because those two now have to agree about camber.
+% The single tire evaluator: use it rather than reading mu_of_load and
+% p.Ca_coef separately, so grip, stiffness and camber stay consistent.
 %
 % RETURNS  (tire boundary units: lbf and deg, per the repo convention)
 %   F.mu_y        [-]        peak lateral friction available, DERATED (mu_derate)
@@ -16,7 +15,7 @@ function F = tire_forces(p, Fz_lbf, alpha_deg, gamma_deg)
 %   F.dSH_deg     [deg]      camber thrust as an equivalent slip angle
 %   F.Fy_at_zero_alpha_lbf   [lbf] the camber thrust itself
 %   F.fD, F.fC    [-]        the camber factors that were applied
-%   F.clamped_*   logical    the request left the fitted box (see below)
+%   F.clamped_*   logical    the request left the fitted camber box (see tire_camber)
 %
 % INPUTS
 %   Fz_lbf     vertical load, positive
@@ -24,18 +23,16 @@ function F = tire_forces(p, Fz_lbf, alpha_deg, gamma_deg)
 %   gamma_deg  camber. POSITIVE = leaning so camber thrust ADDS to the force
 %              generated at positive alpha. That is the loaded outside wheel of
 %              a car in a corner, and it is NEGATIVE camber in the usual SAE
-%              chassis convention. models/tire_camber.m has the full story.
+%              chassis convention (see tire_camber).
 %
-% Theory: references/VD_physics_reference.md sec 8 (curve), 8b (camber), 13 (load).
+% Theory: VD_physics_reference.md sec 8 (curve), 8b (camber), 13 (load).
 %
-% NOT MODELLED HERE (deliberately, and each is a real gap):
-%   - longitudinal force and combined slip: still the friction ellipse in
-%     ax_combined, which has no camber term
-%   - aligning moment: targets/aligning_moment.m, separate and outside the
-%     hash gate
-%   - inflation pressure: the fit reference pressure is baked in. The TTC data
-%     DOES contain a pressure sweep, but pressure is confounded with test order
-%     in these files - see VD_physics_reference.md sec 8b
+% NOT MODELLED:
+%   - longitudinal force and combined slip (the friction ellipse lives in
+%     ax_combined, with no camber term)
+%   - aligning moment (targets/aligning_moment.m reads the TTC data directly)
+%   - inflation pressure: the TTC files contain a pressure sweep, but it is
+%     confounded with test order, so the fit uses one pressure band
 %   - temperature, wear, relaxation length
 
 if nargin < 4 || isempty(gamma_deg), gamma_deg = 0; end
@@ -53,10 +50,8 @@ end
 F.mu_y       = mu_of_load(p, Fz_lbf, gamma_deg);      % camber applied inside
 F.Fy_max_lbf = F.mu_y .* Fz_lbf;
 
-% Ca(Fz) is a quadratic fitted over the tested loads. It has a maximum, and
-% past that maximum it falls - which is a property of the polynomial, not of
-% the tire. Clamp at the vertex so a heavy outer tire never reads a stiffness
-% that is coming back down the wrong side of a parabola.
+% Ca(Fz) is a fitted quadratic. Past its vertex it falls, which is the
+% polynomial, not the tire: hold the vertex value beyond it.
 Fz_Ca = Fz_lbf;
 if numel(p.Ca_coef) == 3 && p.Ca_coef(1) < 0
     Fz_vertex = -p.Ca_coef(2) / (2*p.Ca_coef(1));
@@ -71,10 +66,10 @@ F.clamped_load  = cinfo.clamped_load;
 F.camber_active = cinfo.active;
 
 % --- the curve -----------------------------------------------------------
-% B, C and E come from the per-load-bin Magic Formula fits stored in the
-% artifact; D is the capability computed above. This is the same construction
-% pacejka_fit uses internally (mf_at_load), with the derates applied and the
-% camber shift added.
+% B, C, E interpolated from the per-load-bin Magic Formula fits in the
+% artifact; D is the capability above; B is then set so B*C*D equals the
+% cornering stiffness. Same construction as pacejka_fit's mf_at_load, with
+% the derates and the camber shift applied.
 have_curve = isfield(p, 'mf_bin_Fz_lbf') && ~isempty(p.mf_bin_Fz_lbf);
 if isempty(alpha_deg)
     F.Fy_lbf = NaN(size(Fz_lbf));
@@ -95,15 +90,15 @@ if have_curve
         F.Fy_lbf = mf_eval(Bs, Cs, Ds, Es, alpha_deg + dSH);
     end
 elseif ~isempty(alpha_deg)
-    warning('tire_forces:noCurve', ...
-        ['the artifact has no per-bin Magic Formula table (mf_bin_*), so only ' ...
-         'mu and Ca are available. Run: build_tire_coeffs']);
+    vd_warn('tire_forces:noCurve', ...
+        ['The tire file has no force-vs-slip curves, so only peak grip and ' ...
+         'cornering stiffness are available. Rebuild it with build_tire_coeffs.']);
 end
 end
 
 % =========================================================================
 function y = mf_eval(B, C, D, E, alpha_deg)
-% Magic Formula, pure slip. Same expression as pacejka_fit's local mf().
+% Magic Formula, pure slip: D*sin(C*atan(Bx - E*(Bx - atan(Bx)))).
 Bx = B .* alpha_deg;
 y  = D .* sin(C .* atan(Bx - E .* (Bx - atan(Bx))));
 end

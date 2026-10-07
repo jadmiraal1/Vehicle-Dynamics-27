@@ -1,23 +1,29 @@
 function lap_replay(track_csv, speedup, p)
-% LAP_REPLAY  Animated speed-trace replay of the lap sim.
-%
+% LAP_REPLAY  Animated replay of a simulated lap: track map and g-g usage.
 %   lap_replay(track_csv, speedup)      the active car
 %   lap_replay(track_csv, speedup, p)   an explicit params struct (see vd_set)
+% The envelope drawn is the point-mass gg_envelope at the current speed, for
+% orientation; the lap itself runs on the models selected in p.
 
 if nargin < 1 || isempty(track_csv), track_csv = 'track_representative.csv'; end
 if nargin < 2, speedup = 1; end
 
 if nargin < 3 || isempty(p), p = vehicle_params(); end   % no p = the active car
+vd_warn('reset');
 here = vd_root();
-[s, kappa, x, y] = load_track(fullfile(here, 'tracks', track_csv));
-[v, t_lap] = lap_sim(p, s, kappa, [], true);
+[s, kappa, x, y, prov] = load_track(fullfile(here, 'tracks', track_csv));
+if prov.closed
+    [v, t_lap] = lap_sim(p, s, kappa, [], true);
+else
+    [v, t_lap] = lap_sim(p, s, kappa, 0, false);      % open course from rest
+end
 
 % Per-point time stamps and accelerations
 ds   = diff(s);
 v_mid = 0.5*(v(1:end-1) + v(2:end));
 t    = [0; cumsum(ds ./ max(v_mid, 0.1))];
 ax_g = [diff(v.^2) ./ (2*ds); 0] / p.g;        % longitudinal [g]
-ay_g = v.^2 .* kappa / p.g;                    % lateral, signed [g]
+ay_g = v.^2 .* kappa / p.g;                    % lateral [g], sign as in the CSV
 
 % Layout
 fig = figure('Name', sprintf('lap replay: %s  (%.2f s)', track_csv, t_lap), ...

@@ -1,26 +1,19 @@
 function mu = mu_of_load(p, Fz_lbf, gamma_deg)
 % MU_OF_LOAD  Load-sensitive peak lateral mu of the design tire, derated. Vectorized.
-%   mu = mu_of_load(p, Fz_lbf)              zero camber - unchanged behaviour
-%   mu = mu_of_load(p, Fz_lbf, gamma_deg)   with camber
+%   mu = mu_of_load(p, Fz_lbf)              zero camber
+%   mu = mu_of_load(p, Fz_lbf, gamma_deg)   with camber (gamma > 0 = helpful lean)
 %
-% Measured fit to Fz_fit_max, donor-informed slope above; p.tire_hiload='low' brackets.
-% Camber multiplies the result by tire_camber's peak factor fD; gamma > 0 is the
-% helpful lean (see models/tire_camber.m for the sign). Calling this with two
-% arguments is EXACTLY the old function - fD(0) = 1 identically, not to within a
-% tolerance - which is what tests/vd_selftest.m asserts.
-% Theory: references/VD_physics_reference.md sec 13 (load), sec 8b (camber).
+% Up to the edge of the tire data (p.Fz_fit_max) mu follows the fitted line
+% p.mu_coef. Above it, p.tire_hiload selects the extrapolation:
+%   'central'  continue with p.mu_hiload_slope (donor-tire informed)
+%   'low'      continue the fitted line (pessimistic bracket)
+% Camber multiplies the result by tire_camber's peak factor; with gamma = 0
+% that factor is exactly 1, so the two-argument call is unchanged.
+% Theory: VD_physics_reference.md sec 13 (load) and 8b (camber).
+%
+% Hot path (~1e5 calls per g-g-V surface): the argument checks are written
+% cheapest-first and only do expensive work when something is wrong.
 
-% --- Input validation -----------------------------------------------------
-% HOT PATH. One g-g-V surface calls this ~120,000 times, so the checks below
-% are written fast-first: a cheap test that almost always passes, and the slow,
-% helpful version only when something is actually wrong.
-%
-% This is not premature optimisation, it is a measured one. The previous form
-% used ismember(mode, {'central','low'}) and a loop of isfield over a cell
-% array of names. Measured at 123 us and 19 us per call respectively - so the
-% ARGUMENT CHECKING cost more than the physics, and at 120k calls it was
-% roughly 17 seconds of a single vd_selftest run. Same checks, same error
-% messages, ~40x cheaper.
 if ~(isfield(p, 'Fz_fit_max') && isfield(p, 'mu_coef') && isfield(p, 'mu_derate'))
     explain_missing(p, {'Fz_fit_max', 'mu_coef', 'mu_derate'});   % errors
 end
@@ -41,9 +34,15 @@ end
 
 Fz = max(Fz_lbf(:).', 25);          % row, floor at 25 lbf (below any data)
 if any(Fz_lbf(:) < 25)
-    warning('mu_of_load:belowFloor', ...
-        'Fz_lbf contains values below 25 lbf (min %.1f) - clamped to 25. Check for a units or sign error.', ...
-        min(Fz_lbf(:)));
+    if any(Fz_lbf(:) < 0)
+        vd_warn('mu_of_load:negativeLoad', ...
+            'A negative tire load (%.1f lbf) reached mu_of_load - check units and sign (it expects lbf).', ...
+            min(Fz_lbf(:)));
+    else
+        % A nearly lifted inside wheel: legitimate, and its force is small.
+        vd_warn('mu_of_load:belowFloor', ...
+            'Tire loads under 25 lbf (a nearly lifted inside wheel) are evaluated at 25 lbf.');
+    end
 end
 edge = p.Fz_fit_max;
 
@@ -54,37 +53,30 @@ else
     hi     = Fz > edge;
     mu_raw(hi) = polyval(p.mu_coef, edge) + p.mu_hiload_slope .* (Fz(hi) - edge);
 
-    % Surface the "beyond even donor coverage" warning here, not just in
-    % build_tire_coeffs, so axle_grip / the tire report get it too.
+    % Past every tire's data: say so once per run.
     if isfield(p, 'hiload_cov_lbf') && any(Fz(hi) > p.hiload_cov_lbf)
-        n_beyond = nnz(Fz(hi) > p.hiload_cov_lbf);
-        warning('mu_of_load:beyondDonorCoverage', ...
-            ['%d of %d requested load(s) exceed even the donor coverage (%.0f lbf).\n' ...
-             'mu there rests on the donor slope extended past its own support - ' ...
-             'run with p.tire_hiload = ''low'' too and report the band.'], ...
-            n_beyond, numel(Fz), p.hiload_cov_lbf);
+        vd_warn('mu_of_load:beyondDonorCoverage', ...
+            ['Tire loads above %.0f lbf, where the tire data ends: grip there is ' ...
+             'extrapolated (see docs/STATUS.md, Tire model).'], p.hiload_cov_lbf);
     end
 end
 
-% Physical floor: a straight-line extrapolation (especially 'low' mode) can run
-% to zero or negative at a high enough load. mu <= 0 is not tire behavior, it is
-% the extrapolation failing - clamp and say so rather than passing it downstream.
+% A straight-line extrapolation can reach zero at a high enough load. That is
+% the extrapolation failing, not tire behaviour: clamp and warn.
 MU_FLOOR = 0.1;
 below = mu_raw < MU_FLOOR;
 if any(below)
-    warning('mu_of_load:floored', ...
-        '%d of %d mu value(s) fell below the physical floor (%.2f) and were clamped - extrapolation has likely gone too far.', ...
-        nnz(below), numel(mu_raw), MU_FLOOR);
+    vd_warn('mu_of_load:floored', ...
+        'Extrapolated tire grip fell below %.2f and was held there: the tire load is far beyond the data.', ...
+        MU_FLOOR);
     mu_raw(below) = MU_FLOOR;
 end
 
 mu = reshape(mu_raw * p.mu_derate, size(Fz_lbf));
 
 % --- camber ---------------------------------------------------------------
-% Separated deliberately: the load curve above is fitted from the near-zero
-% camber data, and the camber factor is a RATIO measured against that same
-% zero-camber condition. Multiplying is therefore the correct composition, and
-% it is also what makes gamma = 0 reduce to the old answer bit for bit.
+% The load curve is fitted to near-zero-camber data and the camber factor is
+% a ratio against that same condition, so the two multiply.
 if nargin >= 3 && ~isempty(gamma_deg) && any(gamma_deg(:) ~= 0)
     fD = tire_camber(p, reshape(Fz, size(Fz_lbf)), gamma_deg);
     mu = mu .* fD;
@@ -92,7 +84,7 @@ end
 end
 
 function explain_missing(p, required)
-% Off the hot path: work out WHICH field is missing and say so.
+% Off the hot path: name the missing field.
 for k = 1:numel(required)
     if ~isfield(p, required{k})
         error('mu_of_load:missingField', ...

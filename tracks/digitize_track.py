@@ -9,10 +9,8 @@ Method: extract the bold red course line, skeletonize, order into a path, fit a
 smoothing spline, compute curvature (clipped at 1/R_MIN), then inject slalom
 weave curvature where dashed cone markings sit off the centerline.
 
-SCALE IS AUTO-CALIBRATED from the paddock grid (FFT + peak-find on the grid
-lines) -- it is NOT a hand-typed constant. The old GRID_PX = 11.6 was wrong;
-the sheets measure 12.00 px, a 3.4% distance error that inflated every lap
-time and energy number. Auto-calibration means that class of bug cannot recur.
+The scale is calibrated automatically from the paddock grid (FFT and peak
+finding on the grid lines), not typed in by hand.
 
 Every run writes provenance into the CSV header: scale, source PNG + its md5,
 course length, and whether slalom spacings were verified.
@@ -35,38 +33,23 @@ from scipy.ndimage import convolve
 FT = 0.3048
 R_MIN = 4.5          # tightest physical FSAE corner [m] -> curvature clip
 WEAVE_A = 0.85       # slalom lateral weave amplitude [m]
-TOL_PX = 0.75        # spline residual tolerance [px]: the skeletonization
-                     # noise floor. Scale-invariant by construction (see
-                     # smooth()). 0.75 px is (a) physically right -- the
-                     # skeleton of a ~5 px line locates the centreline to
-                     # better than a pixel -- and (b) equal to the OLD code's
-                     # effective tolerance (its s=0.2n in m^2 at 0.657 m/px
-                     # works out to 0.68 px). So fixing the SCALE bug does not
-                     # also silently re-characterise the tracks: one change at
-                     # a time. Course length is robust to this (+/-2% over
-                     # tol_px 0.5..2.0); slalom span DETECTION is not, which is
-                     # one more reason those spacings stay Provisional.
+TOL_PX = 0.75        # spline residual tolerance [px]: the skeletonization noise
+                     # floor (the skeleton of a ~5 px line locates the centreline
+                     # to under a pixel). Course length moves +/-2% over
+                     # 0.5-2.0 px; slalom detection is more sensitive.
 MAX_SLALOM_M = 120.0  # a detected 'slalom' longer than this is not a slalom
 
 # ----------------------------------------------------------------------------
-# Per-track configuration. One place. No magic numbers buried in functions.
+# Per-track configuration
 # ----------------------------------------------------------------------------
 # slalom_zones: (x0_px, x1_px, y0_px, y1_px, cone_spacing_ft)
 #
-# !! SLALOM SPACINGS ARE UNVERIFIED (target-catalog status: Provisional) !!
-# The 1024-px sheet exports are too coarse to read the cone-spacing
-# annotations. Zooming to 9x, the autocross bottom-run annotation is
-# legible only as "33'->30' spacing" or possibly "35'->50'". The previous
-# version of this file hard-coded "35->53 ft, mean 44" -- a value carried
-# over from an EARLIER YEAR'S sheet and never revalidated.
-#
-# This matters: k_peak = WEAVE_A * (pi/d_cone)^2, so d_cone = 44 ft vs 31 ft
-# is a 2x difference in slalom curvature, and slaloms are a large share of
-# autocross time.
-#
-# TO RESOLVE: re-export the sheets at >=3x resolution from the source PDF,
-# read the annotations, and set these. Until then every slalom-influenced
-# target stays Provisional.
+# SLALOM SPACINGS ARE UNVERIFIED (Provisional). The 1024-px sheet exports are
+# too coarse to read the cone-spacing annotations reliably. Spacing matters:
+# k_peak = WEAVE_A * (pi/d_cone)^2, so 44 ft vs 31 ft is a 2x difference in
+# slalom curvature. To resolve: re-export the sheets at >=3x resolution from
+# the source PDF, read the annotations, set the values here and mark them
+# verified.
 TRACKS = {
     'endurance': dict(
         png='endurance_2026.png',
@@ -80,10 +63,8 @@ TRACKS = {
         png='skidpad_autocross_2026.png',
         closed=False,
         grid_ft=25.0,
-        # y-boxes below are the two runs of the out-and-back. The course
-        # occupies y 19..80 px; the midline is y=50. The OLD boxes (0-50 and
-        # 60-122) left a dead band at y 50..60 that silently fell through to
-        # the 30 ft default.
+        # y-boxes are the two runs of the out-and-back; they meet at the
+        # course midline (y = 50 px) so no cone falls between boxes.
         slalom_zones=[
             (480, 1024,  0, 50, 32.0),   # top (outbound) run   -- UNVERIFIED
             (550, 1024, 50, 122, 31.5),  # bottom (return) run  -- UNVERIFIED
@@ -119,16 +100,11 @@ def calibrate_scale(img, grid_ft):
 def extract_path(img, closed_loop):
     """Largest bold-red component -> skeleton -> ordered pixel path."""
     R, G, B = img[..., 0], img[..., 1], img[..., 2]
-    # ONE mask for both extraction and slalom detection.
-    #
-    # Do NOT tighten this to "bold red only". The two sheets are rendered
-    # differently: the autocross course is saturated red (median RGB ~233,38),
-    # but the endurance course is a paler, more anti-aliased red (~192,82). A
-    # bold-only threshold shatters the endurance line into 5 fragments and
-    # yields a 125 m "course". The loose threshold recovers a single clean
-    # component on BOTH sheets; the pale staging lanes and dashed cone
-    # markings survive as separate, smaller components and are rejected by
-    # the largest-component rule.
+    # One mask for both extraction and slalom detection. Keep it loose: the
+    # endurance sheet's course is a paler red (~192,82) than the autocross
+    # sheet's (~233,38), and a strict threshold breaks it into fragments.
+    # Staging lanes and cone markings are separate, smaller components and
+    # are rejected by keeping the largest component.
     mask_loose = (R > 120) & (R - G > 50) & (R - B > 50)
 
     lab = label(closing(mask_loose, disk(2)))
@@ -179,18 +155,10 @@ def extract_path(img, closed_loop):
 def smooth(path_px, m_per_px, closed_loop, tol_px=TOL_PX, ds=1.0):
     """Spline-smooth the ordered path and take curvature.
 
-    Fitted in PIXEL space, then scaled to metres. This matters: splprep's
-    smoothing parameter `s` bounds the sum of squared residuals *in the units
-    of the input coordinates*. The previous version fitted in METRES with
-    s = 0.2*n, so the physical amount of smoothing silently depended on the
-    m/px scale factor -- recalibrate the scale and you quietly change every
-    curvature, and therefore every lap time. Exactly the class of hidden
-    coupling this refactor exists to remove.
-
-    Pixel space is also where the noise actually lives: the residual being
-    smoothed out is skeletonization/quantization error of order 1 px. So
-    s = n * tol_px^2 with tol_px ~ 1 px is both scale-invariant and physically
-    motivated, instead of a tuned magic number.
+    Fitted in PIXEL space, then scaled to metres: splprep's smoothing
+    parameter bounds the squared residuals in the input units, so fitting in
+    pixels keeps the smoothing independent of the m/px scale. The noise being
+    removed is skeletonization error of order 1 px, hence s = n * tol_px^2.
     """
     x, y = path_px[:, 0].copy(), path_px[:, 1].copy()
     if closed_loop:

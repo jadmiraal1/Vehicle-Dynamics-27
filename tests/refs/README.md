@@ -1,40 +1,28 @@
 # Golden-value baselines
 
-`golden_<CAR>.tsv` is every number this toolchain produces, for one car, as a
-sorted tab-separated text file. `tests/vd_golden.m` writes and compares it.
+`golden_<CAR>.tsv` holds every number the toolchain produces for one car, as a
+sorted, tab-separated text file. `tests/vd_golden.m` writes and compares it.
+Being text and sorted, a pull-request diff shows **which** number moved and by
+**how much**.
 
-**There is no baseline in this folder yet.** Generate one:
+## When `vd_golden` reports drift
 
-```matlab
-vd_setup
-vd_golden('bless')     % on a machine WITH the Optimization Toolbox
-```
+A failure is not a bug report: it says a number moved, which is sometimes the
+point of the change.
 
-then commit the `.tsv`. Until you do, the golden step of CI will fail and tell
-you this.
-
-## Why text, and why sorted
-
-So that a pull request diff shows you **which** number moved and **by how
-much**. A `.mat` reference would only tell you that something changed, which is
-the least useful half of the answer.
-
-## The rule
-
-A failure here is not a bug report - it says a number moved, and sometimes that
-is the point of the change. So:
-
-1. `vd_golden` -> read the list of what moved
-2. every line should be a change you meant to make
+1. `vd_golden` and read the list of what moved
+2. every line should be a change you meant to make - if not, stop and explain it
 3. `vd_golden('bless')`
 4. commit the code **and** the `.tsv` in the same commit
 
-Step 2 is the only one that matters. Blessing without reading turns this into a
-rubber stamp, which is worse than having nothing - it will make you confident
-about a change nobody checked.
+Blessing without reading the list makes the baseline useless.
 
-## Generate it on a machine with the Optimization Toolbox
+## Where to bless
 
-Without it, `fit_mf` falls back to `fminsearch` and the tire artifact comes out
-different (cornering stiffness ~32% low). A baseline blessed on a machine
-without the toolbox does not describe the same model as CI runs.
+Bless on a machine with the **Optimization Toolbox**. The tire artifact is
+fitted with `lsqcurvefit`; without the toolbox the fit takes a different code
+path and gives a different tire, so a baseline blessed there would not match CI.
+
+`vd_golden` covers everything downstream of the committed tire artifact. It does
+not cover anything that needs `TTC_Data/` (the fits themselves and
+`aligning_moment`); `vd_selftest` checks those on a machine with the data.

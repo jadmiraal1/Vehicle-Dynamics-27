@@ -1,60 +1,53 @@
 function [total, brk] = fsae_points(ev, bm, opts)
-% FSAE_POINTS  Dynamic-event scoring. The ONE home for the points model.
+% FSAE_POINTS  Dynamic-event points from simulated times. The one scoring model.
 %   [total, brk] = fsae_points(ev, bm)
 %   [total, brk] = fsae_points(ev, bm, opts)
 %
-% WHY THIS FILE EXISTS
-% --------------------
-% The scoring formulas lived as local functions inside run_aero_targets.m, so
-% they were reachable from exactly one script. Any other study that wanted to
-% state a result in POINTS - the pack sizing study, the gear freeze - had to
-% either copy the formulas or stop at seconds and let the reader convert.
-%
-% Copies drift. The moment two scripts hold their own tscore, the aero answer
-% and the pack answer stop being comparable and nobody notices, because both
-% still print a plausible number. Same reasoning as vd_const and vd_derive:
-% one home, or no home at all.
-%
-% The QSS haircut lives here too. It is not a scoring rule - it is the standing
-% correction for the lap sim's optimism (perfect driver, no tyre wear, no
-% traffic) - but it must be applied identically everywhere or the studies stop
-% agreeing. Pass RAW simulated times; this function applies it.
-%
 % INPUTS
-%   ev   event times in SECONDS, before the haircut:
-%          ev.accel          75 m standing start
+%   ev   simulated times in SECONDS, before the haircut:
+%          ev.accel          75 m from rest
 %          ev.skidpad        one timed skidpad lap
 %          ev.autocross      one autocross run
-%          ev.endurance_lap  one endurance lap        (with ev.laps)
-%          ev.laps           lap count for scoring    (default bm-consistent 22)
-%          ev.energy_kWh     energy consumed over ev.laps laps
-%        Any field omitted or NaN scores NaN, is named in brk.missing, and is
-%        left OUT of total. A partial score is honest; a silently-short total
-%        pretending to be complete is not.
-%
-%   bm   benchmark struct from read_benchmarks (the real 2026 Tmins)
-%
-%   opts .haircut    sprint-time inflation vs QSS      (default 0.08)
-%        .ef_max     best real efficiency factor       (default 0.60) PROVISIONAL
-%        .e_min_kWh  lowest real 22-lap finisher energy(default 2.696)
+%          ev.endurance_lap  one endurance lap
+%          ev.laps           endurance lap count (default bm.endurance_laps, else 22)
+%          ev.energy_kWh     energy used over ev.laps laps
+%          ev.lap_km         endurance lap length [km] (needed for efficiency)
+%        A field that is missing or NaN scores NaN, is listed in brk.missing
+%        and is left out of total.
+%   bm   real competition results from read_benchmarks (the Tmin values)
+%   opts .haircut    sprint-time inflation applied to the QSS times (default 0.08)
+%        .ef_max     best efficiency factor in the field (default 0.60) PROVISIONAL
+%        .e_min_kWh  lowest finisher energy over bm.endurance_laps (default 2.696)
 %
 % OUTPUTS
-%   total  sum of the events that actually scored
-%   brk    .accel .skidpad .autocross .endurance .efficiency  per-event points
-%          .t_used   the post-haircut times actually scored (report these, not
-%                    the raw inputs, or your printed times won't match the score)
-%          .missing  cellstr of events that could not be scored
-%          .complete true only when all five scored
+%   total  sum of the events that scored
+%   brk    per-event points (.accel .skidpad .autocross .endurance .efficiency),
+%          .t_used (the post-haircut times actually scored), .ef, .ef_min,
+%          .missing, .complete (true only when all five scored)
 %
-% Event weights are the FSAE dynamic allocation: accel 100, skidpad 75,
-% autocross 125, endurance 275, efficiency 100. The min/variable split within
-% each is the rulebook's; the Tmins are real 2026 results, not our own times.
+% Scoring follows FSAE Rules 2026 D.9-D.13 (see fsae_rules):
+%   accel      95.5 * (Tmax/T - 1)/(Tmax/Tmin - 1) + 4.5,          Tmax = 1.50 Tmin
+%   skidpad    71.5 * ((Tmax/T)^2 - 1)/((Tmax/Tmin)^2 - 1) + 3.5,  Tmax = 1.25 Tmin
+%   autocross  118.5 * (Tmax/T - 1)/(Tmax/Tmin - 1) + 6.5,         Tmax = 1.45 Tmin
+%   endurance  250 * (Tmax/T - 1)/(Tmax/Tmin - 1),                 Tmax = 1.45 Tmin,
+%              plus up to 25 for laps completed (taken as 25 here: the
+%              rules give no formula, and every lap is assumed finished)
+%   efficiency 100 * (EF - EF_min)/(EF_max - EF_min), where
+%              EF = (Tmin/T)_per lap * (CO2min/CO2)_per lap, and EF_min is EF at
+%              T = 1.45 Tmin with the reference 20.02 kg CO2/100 km (D.13.4.5).
+%              Zero if energy per lap exceeds that reference or the mean lap
+%              is slower than 1.45x the fastest (D.13.3).
+% Tmin is the real benchmark, floored at our own time: if we are quicker, we
+% set Tmin. The haircut corrects the QSS optimism (perfect driver, no
+% traffic); endurance gets half of it because its pace is power-capped.
 
 if nargin < 3, opts = struct(); end
 if ~isfield(opts, 'haircut'),   opts.haircut   = 0.08;  end
 if ~isfield(opts, 'ef_max'),    opts.ef_max    = 0.60;  end
 if ~isfield(opts, 'e_min_kWh'), opts.e_min_kWh = 2.696; end
-if ~isfield(ev,   'laps'),      ev.laps        = 22;    end
+bm_laps = 22;
+if isfield(bm, 'endurance_laps'), bm_laps = bm.endurance_laps; end
+if ~isfield(ev, 'laps'), ev.laps = bm_laps; end
 
 g = @(f) local_get(ev, f);
 
@@ -63,7 +56,7 @@ brk = struct('accel', NaN, 'skidpad', NaN, 'autocross', NaN, ...
 brk.t_used = struct();
 missing = {};
 
-% --- Sprint events: full haircut ---------------------------------------
+% --- sprint events: full haircut ------------------------------------------
 t = g('accel');
 if ~isnan(t)
     brk.t_used.accel = t * (1 + opts.haircut);
@@ -82,25 +75,35 @@ if ~isnan(t)
     brk.autocross = tscore(brk.t_used.autocross, bm.autocross_tmin_s, 1.45, 118.5, 6.5, false);
 else, missing{end+1} = 'autocross'; end
 
-% --- Endurance: HALF haircut. The pace is capped by the power limit, so the
-% driver-and-conditions optimism the haircut corrects for is largely absent.
+% --- endurance: half haircut ----------------------------------------------
 t = g('endurance_lap');
 t_tot = NaN;
 if ~isnan(t)
     t_tot = t * ev.laps * (1 + opts.haircut*0.5);
     brk.t_used.endurance_total = t_tot;
-    brk.endurance = tscore(t_tot, bm.endurance_tmin_s, 1.45, 250.0, 25.0, false);
+    brk.endurance = tscore(t_tot / ev.laps * bm_laps, bm.endurance_tmin_s, ...
+                           1.45, 250.0, 25.0, false);
 else, missing{end+1} = 'endurance'; end
 
-% --- Efficiency: needs BOTH a time and an energy, and it moves the opposite
-% way to endurance - a bigger pack lets you run a higher cap, which burns more
-% energy, which costs efficiency points. Scoring one without the other is how
-% a study talks itself into a pack it does not need.
-E = g('energy_kWh');
-if ~isnan(t_tot) && ~isnan(E)
-    ef = (bm.endurance_tmin_s / t_tot) * (opts.e_min_kWh / max(E, opts.e_min_kWh));
-    brk.efficiency = min(100, max(0, 100 * (ef - 0.1) / (opts.ef_max - 0.1)));
-    brk.ef = ef;
+% --- efficiency (needs time, energy and lap length) -------------------------
+% It moves opposite to endurance: a bigger pack runs a higher power cap,
+% which uses more energy and costs efficiency points.
+E = g('energy_kWh');  L_km = g('lap_km');
+if ~isnan(t_tot) && ~isnan(E) && ~isnan(L_km)
+    R = fsae_rules();
+    t_lap_min = bm.endurance_tmin_s / bm_laps;          % per-lap terms
+    e_lap_min = opts.e_min_kWh / bm_laps;
+    t_lap = t_tot / ev.laps;
+    e_lap = E / ev.laps;
+    e_lap_ref = R.co2_ref_kg_per_km * L_km / R.co2_kg_per_kWh;   % kWh per lap
+    ef     = min(t_lap_min / t_lap, 1) * (e_lap_min / max(e_lap, e_lap_min));
+    ef_min = (1 / R.ef_min_time_factor) * (e_lap_min / e_lap_ref);
+    if e_lap > e_lap_ref || t_lap > R.ef_min_time_factor * t_lap_min
+        brk.efficiency = 0;
+    else
+        brk.efficiency = min(100, max(0, 100 * (ef - ef_min) / (opts.ef_max - ef_min)));
+    end
+    brk.ef = ef;  brk.ef_min = ef_min;
 else, missing{end+1} = 'efficiency'; end
 
 vals = [brk.accel brk.skidpad brk.autocross brk.endurance brk.efficiency];
@@ -112,9 +115,8 @@ end
 
 
 function s = tscore(t, tmin, fmax, pvar, pmin, squared)
-% FSAE event score. Tmin floors at OUR time - if we are quicker than the real
-% best, we would BE the benchmark, so the formula must not hand out more than
-% the maximum. Beyond tmax = fmax*tmin the event scores its minimum only.
+% Points for time t against the benchmark tmin. Beyond tmax = fmax*tmin the
+% event scores pmin only.
 tmin = min(t, tmin);
 tmax = fmax * tmin;
 t    = min(t, tmax);
