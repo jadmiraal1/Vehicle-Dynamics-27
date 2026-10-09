@@ -4,7 +4,7 @@ function C = camber_fit(data_dir, prefix, verbose)
 %   C = camber_fit(data_dir, prefix, false)   no printing
 %
 % Called by pacejka_fit. Produces the three camber coefficient sets that
-% tire_camber evaluates. Theory: VD_physics_reference.md sec 8b.
+% tire_camber evaluates.
 %
 % WHAT CAMBER DOES TO A TIRE (three separate effects)
 % 1. Camber thrust: a leaning tire makes lateral force at zero slip angle.
@@ -147,7 +147,7 @@ end
 
 % ---- least squares ------------------------------------------------------
 % Forms chosen by leave-one-load-bin-out and leave-one-file-out
-% cross-validation (alternatives in VD_physics_reference.md sec 8b).
+% cross-validation.
 %
 %   peak factor        fD  = 1 + (kD1 + kD2*dfz + kD3*dfz^2)*gamma + kD4*gamma^2
 %   stiffness factor   fC  = 1 + kC1*gamma^2

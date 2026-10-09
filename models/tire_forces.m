@@ -25,8 +25,6 @@ function F = tire_forces(p, Fz_lbf, alpha_deg, gamma_deg)
 %              a car in a corner, and it is NEGATIVE camber in the usual SAE
 %              chassis convention (see tire_camber).
 %
-% Theory: VD_physics_reference.md sec 8 (curve), 8b (camber), 13 (load).
-%
 % NOT MODELLED:
 %   - longitudinal force and combined slip (the friction ellipse lives in
 %     ax_combined, with no camber term)

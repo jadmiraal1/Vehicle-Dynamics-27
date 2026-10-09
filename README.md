@@ -5,10 +5,6 @@ data, load transfer, grip and acceleration limits, a quasi-steady-state lap
 simulator, a linear handling model, energy and cooling studies. The scripts in
 `targets/` turn these into the numbers other subteams design against.
 
-What each model is, how far it can be trusted and what is still open:
-**[docs/STATUS.md](docs/STATUS.md)**. How to work in the repo:
-**[CONTRIBUTING.md](CONTRIBUTING.md)**.
-
 ## Requirements
 
 - **MATLAB R2019b or newer.**
@@ -47,8 +43,7 @@ Optimization Toolbox), then `vd_selftest` again.
     targets/     runnable studies (run_*) that issue targets
     tests/       vd_selftest, vd_golden, ci_checks.py, ci_staleness.py, refs/
     tracks/      digitized courses (CSV) and the digitizer
-    docs/        model status
-    references/  pipeline diagram (tracked); datasheets and internal docs (local only)
+    references/  pipeline diagram (tracked); datasheets (local only)
     TTC_Data/    tire test data (local only)    plots/  generated figures (local only)
 
 ### Where does a number come from?
@@ -123,15 +118,45 @@ python3 tests/ci_staleness.py   % was the tire artifact rebuilt when its sources
   that the tire artifact matches its inputs (skipped, and said so, without
   `TTC_Data/`).
 - **`vd_golden`** runs every target, flattens every number into
-  `tests/refs/golden_<CAR>.tsv` and reports what moved. When a change moves a
-  number on purpose, read the list, run `vd_golden('bless')` and commit the
-  `.tsv` with the code.
+  `tests/refs/golden_<CAR>.tsv` (sorted text, so a pull-request diff shows which
+  number moved and by how much) and reports what moved. Drift is not
+  automatically a bug:
+  1. run `vd_golden` and read the list of what moved;
+  2. every line should be a change you meant to make - if not, stop and find out why;
+  3. `vd_golden('bless')`;
+  4. commit the code **and** the `.tsv` in the same commit.
+
+  Bless on a machine with the Optimization Toolbox (without it the tire fit takes
+  a different code path, so the baseline would not match CI). `vd_golden` covers
+  everything downstream of the committed tire artifact, not the fits themselves.
 - **`tests/ci_checks.py`** needs no MATLAB: every target in this README, every
   target states its assumptions, constants have one home, and similar.
 
 CI has no `TTC_Data/`, so it cannot rebuild or verify the tire fit. After
 editing anything in `tire/`, run `build_tire_coeffs` and `vd_selftest` on a
 machine with the data before pushing.
+
+## Contributing
+
+- One change per branch, through a pull request; CI must pass. Keep a physics
+  change and a refactor in separate commits, and say in the pull request why any
+  golden value moved.
+- Car properties live only in `cars/config_<CAR>.m`. For a what-if use `vd_set`;
+  setting a field directly (`p.m_car = 240`) leaves the derived values (mass,
+  inertia, axle loads) describing the old car.
+- Never hand-edit `tire_coeffs_<CAR>.mat` or `tests/refs/*.tsv`; regenerate them.
+  After editing `tire/`, rebuild on a machine with `TTC_Data/` and the toolbox and
+  commit the artifact with the code. Never commit `TTC_Data/`.
+- Reuse, do not copy: one function each for the 75 m run (`accel_time`), braking
+  (`ax_limit`), axle loads and resistances (`road_loads`), one tire
+  (`tire_forces`) and scoring (`fsae_points`).
+- Units: SI everywhere except the tire interface (lbf, deg, suffixed `_lbf`,
+  `_deg`); accelerations are in g at function interfaces.
+- A new study (CI checks all four): `targets/run_<thing>_targets.m` taking `p` and
+  returning a struct; it prints an `Assumes:` line; it is in the table above; it
+  is in `TARGETS` in `tests/vd_golden.m`. Wrap plotting in `if vd_plots()`.
+- Printed output: start with `vd_warn('reset')`, one result per line with
+  `vd_row`, end with the `Assumes:` line; no internal tracker numbers.
 
 ## Model switches
 
@@ -160,5 +185,3 @@ Quote numbers with the model they came from.
 
 - `plots/`, the team spreadsheets and the datasheets in `references/`
   are not version-controlled; figures are reproduced by the scripts.
-- Code headers refer to sections of `VD_physics_reference.md` (derivations and
-  design notes), kept on the team drive.

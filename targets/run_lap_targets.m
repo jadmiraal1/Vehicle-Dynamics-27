@@ -8,7 +8,7 @@ function out = run_lap_targets(p)
 %
 % Tracks are read from tracks/track_<name>.csv. A closed track (endurance)
 % is simulated as a flying lap; an open one (autocross) from rest at the
-% start line. Theory: VD_physics_reference.md sec 7.
+% start line.
 
 if nargin < 1 || isempty(p), p = vehicle_params(); end
 vd_warn('reset');

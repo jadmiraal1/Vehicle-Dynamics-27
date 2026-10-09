@@ -15,7 +15,6 @@ function ax_g = ax_combined(p, v, ay_g, mode)
 % the available longitudinal acceleration is zero.
 %
 % At ay_g = 0 this reduces to ax_limit's 'axle' edges (checked in vd_selftest).
-% Theory: VD_physics_reference.md sec 5, 11 and 13.
 
 if ~strcmpi(p.drive, 'RWD')
     error('ax_combined:drive', ['The per-axle combined model assumes rear-wheel ' ...

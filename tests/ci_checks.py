@@ -82,8 +82,7 @@ def check_no_tracker_ids():
     """No internal tracker references (T-CGH, #41, ...) in code or docs."""
     t_code = re.compile(r"\bT-[A-Z]{2,}[0-9]*\b")
     hash_n = re.compile(r"(?<![\w&])#[0-9]+\b")
-    files = all_m_files() + ["README.md", "CONTRIBUTING.md", "docs/STATUS.md",
-                             "tests/refs/README.md", "references/code_pipeline.mermaid"]
+    files = all_m_files() + ["README.md", "references/code_pipeline.mermaid"]
     for rel in files:
         if not exists(rel):
             continue
@@ -93,6 +92,24 @@ def check_no_tracker_ids():
                 fail("tracker-id",
                      f"{rel}:{i} refers to '{m.group(0)}', an internal tracker item. "
                      f"Describe the quantity in words instead.")
+
+
+def check_no_private_doc_refs():
+    """Only README.md is published, so nothing tracked may point at another .md file."""
+    pat = re.compile(r"[A-Za-z0-9_./-]+\.md\b")
+    files = all_m_files() + [f"tests/{n}" for n in listdir("tests", ".py")] \
+        + [f"tracks/{n}" for n in listdir("tracks", ".py")] \
+        + ["README.md", "references/code_pipeline.mermaid", ".github/workflows/ci.yml"]
+    for rel in files:
+        if not exists(rel):
+            continue
+        for i, line in enumerate(read(rel).splitlines(), 1):
+            for m in pat.finditer(line):
+                if m.group(0).split("/")[-1] != "README.md" or "/" in m.group(0):
+                    fail("private-doc-ref",
+                         f"{rel}:{i} refers to '{m.group(0)}'. Only the top-level "
+                         f"README.md is published; put the information in the code "
+                         f"comment or the README instead.")
 
 
 def check_artifact_filename():
@@ -254,6 +271,7 @@ CHECKS = [
     ("targets listed in README", check_targets_in_readme),
     ("every target states its assumptions", check_caveat_lines),
     ("no internal tracker references", check_no_tracker_ids),
+    ("no pointers to unpublished docs", check_no_private_doc_refs),
     ("artifact filename is current", check_artifact_filename),
     ("staleness gate has one input list", check_tire_src_files_agree),
     ("lbf conversion has one home", check_no_bare_lbf_constant),

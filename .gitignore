@@ -29,7 +29,10 @@ plots/
 organization/*
 !organization/comp_benchmarks_2026.csv
 /*.xlsx
-/VD_toolchain_roadmap.md
+
+# Markdown notes are local only; the top-level README is the one published doc.
+*.md
+!/README.md
 
 # Track source scans and previews (the digitized CSVs the code reads ARE tracked)
 tracks/*.png

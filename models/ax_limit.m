@@ -12,8 +12,6 @@ function ax_g = ax_limit(p, v, mode)
 % 'accel' assumes rear-wheel drive and is capped by the motor (gg_envelope).
 % 'brake' assumes ideal brake bias (every tire at its own limit), which is
 % the upper bound a fixed-bias car can only match at one deceleration.
-%
-% Theory: VD_physics_reference.md sec 5 and 13.
 
 model = 'axle';
 if isfield(p, 'long_model') && ~isempty(p.long_model)

@@ -17,7 +17,6 @@ function [fD, fC, dSH_deg, info] = tire_camber(p, Fz_lbf, gamma_deg)
 %
 % This is the only implementation of these polynomials; everything that uses
 % camber calls it. Coefficients come from the tire artifact (p.camber_*).
-% Theory: VD_physics_reference.md sec 8b.
 
 % --- no camber terms in the artifact: every factor is neutral -----------
 if ~isfield(p, 'camber_kD') || all(p.camber_kD == 0)

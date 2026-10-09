@@ -4,7 +4,7 @@ function out = aligning_moment(p)
 % Reads the design tire's TTC data directly (needs TTC_Data/; not in the
 % tire artifact, so not covered by the staleness check or vd_golden).
 % Mechanical trail is taken as Re*tan(caster), i.e. zero caster offset at
-% the hub. Theory: VD_physics_reference.md sec 8 and 13.
+% the hub.
 %
 %   out = aligning_moment()      the active car (vd_car / cars/config_<CAR>.m)
 %   out = aligning_moment(p)     an explicit params struct; build "what if?" cars with vd_set

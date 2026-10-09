@@ -11,7 +11,7 @@ function B = bicycle_model(p, Ca_axle_f, Ca_axle_r, v_sweep)
 %   B.tau_slow, B.zeta_eq  slowest-pole time constant [s] and equivalent damping
 %                      of the 2-state (sideslip, yaw rate) model
 % Uses static axle loads and constant stiffness: no load transfer, no
-% downforce, linear tires. Theory: VD_physics_reference.md sec 10.
+% downforce, linear tires.
 
 req_fields = {'m','Izz','a','b','L','g','Wf_static','Wr_static'};
 missing = req_fields(~isfield(p, req_fields));

@@ -9,7 +9,6 @@ function mu = mu_of_load(p, Fz_lbf, gamma_deg)
 %   'low'      continue the fitted line (pessimistic bracket)
 % Camber multiplies the result by tire_camber's peak factor; with gamma = 0
 % that factor is exactly 1, so the two-argument call is unchanged.
-% Theory: VD_physics_reference.md sec 13 (load) and 8b (camber).
 %
 % Hot path (~1e5 calls per g-g-V surface): the argument checks are written
 % cheapest-first and only do expensive work when something is wrong.
@@ -57,7 +56,7 @@ else
     if isfield(p, 'hiload_cov_lbf') && any(Fz(hi) > p.hiload_cov_lbf)
         vd_warn('mu_of_load:beyondDonorCoverage', ...
             ['Tire loads above %.0f lbf, where the tire data ends: grip there is ' ...
-             'extrapolated (see docs/STATUS.md, Tire model).'], p.hiload_cov_lbf);
+             'extrapolated from the measured trend.'], p.hiload_cov_lbf);
     end
 end
 

@@ -6,7 +6,7 @@ function [K_deg, info] = understeer_at(p, ax_g)
 % transfer: K = Wf/Ca_f - Wr/Ca_r, with each axle's cornering stiffness read
 % from the tire at its new load. Valid sub-limit (roughly below 0.4 g lateral)
 % and for sign and trend; it cannot see trail-brake rotation, which is a
-% friction-circle effect. Theory: VD_physics_reference.md sec 10 and 13.
+% friction-circle effect.
 
 LT = load_transfer(p, 0, ax_g);        % ay = 0: pure longitudinal transfer
 

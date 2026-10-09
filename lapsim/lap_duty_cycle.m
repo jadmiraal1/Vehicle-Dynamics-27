@@ -38,7 +38,7 @@ function D = lap_duty_cycle(p, v, s)
 % carry P_max to the wheel, while this accounting uses chain x inverter x
 % motor map. The two efficiencies differ by a few percent, so P_elec_W can
 % read slightly above P_max at full power.
-% Theory: VD_physics_reference.md sec 7; EMRAX 228 technical data p.2-3.
+% Motor data: EMRAX 228 technical data, p.2-3.
 
 v  = v(:);  s = s(:);
 ds = diff(s);

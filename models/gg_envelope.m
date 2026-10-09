@@ -13,8 +13,6 @@ function GG = gg_envelope(p, v)
 %   GG.ax_motor     motor/power-limited acceleration alone (ax_limit reuses it)
 %   GG.ax_traction  traction-limited acceleration alone
 %   GG.power_limited  true above the motor's base speed
-%
-% Theory: VD_physics_reference.md sec 5.
 
 R = road_loads(p, v);
 N = R.N;  m_eff = R.m_eff;  F_loss = R.F_loss;

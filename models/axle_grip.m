@@ -22,7 +22,6 @@ function out = axle_grip(p, v)
 %
 % LLTD here splits the roll MOMENT m*ay*h_cg between axles; with unequal
 % tracks the force fractions differ slightly from LLTD.
-% Theory: VD_physics_reference.md sec 11 and 8b.
 
 R   = road_loads(p, v);
 W_f = R.Nf;

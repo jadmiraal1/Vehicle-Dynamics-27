@@ -20,7 +20,6 @@ function [v, t, E] = lap_sim(p, s, kappa, v0, closed)
 % (accelerate), a backward pass (brake), each node taking the lower speed.
 % A closed lap repeats the passes with the end speed fed back to the start.
 % No yaw dynamics, no transients, no racing line.
-% Theory: VD_physics_reference.md sec 7.
 
 if nargin < 4, v0 = []; end
 if nargin < 5, closed = true; end

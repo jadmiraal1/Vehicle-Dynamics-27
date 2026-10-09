@@ -9,7 +9,6 @@ function R = pacejka_fit()
 % longitudinal curves and the combined-slip ellipse exponents, and calls
 % camber_fit. build_tire_coeffs turns the design tire's result into
 % tire_coeffs_<CAR>.mat; never copy numbers from the printout by hand.
-% Theory: VD_physics_reference.md sec 8.
 
 p = vehicle_params('bootstrap');   % car mass only; must not require the
                                    % artifact that this fit produces
